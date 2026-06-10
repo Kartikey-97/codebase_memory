@@ -81,7 +81,7 @@ and numbers, and the list of affected_files.
    Condition: A file has >= 8 inbound dependents AND doc_coverage < 0.3.
    Severity: "critical" if dependents >= 15, "warning" otherwise.
    Title format: "Core component risk: <filename>"
-   Description: Write a brief analytical explanation of WHY changing this file is risky. For example: "This file is a core dependency relied upon by {dependents} other modules, but lacks proper documentation. Blind modifications could easily trigger cascading failures." Do NOT just restate the numbers.
+   Description: Write a brief analytical explanation of WHY changing this file is risky. For example: "This file is a core dependency relied upon by {{dependents}} other modules, but lacks proper documentation. Blind modifications could easily trigger cascading failures." Do NOT just restate the numbers.
 
 7. architecture_suggestion
    Condition: Always generate at least 1 architecture suggestion based on the repo overview.

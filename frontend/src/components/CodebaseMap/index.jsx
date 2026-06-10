@@ -139,7 +139,7 @@ function CodebaseMap({ repoId }) {
           radius: Math.max(4, Math.min(16, 4 + deps * 1.5)),
           color: (() => {
             const pathStr = f.path.toLowerCase();
-            if (pathStr.includes('src/') || pathStr.includes('components/') || pathStr.includes('pages/') || pathStr.includes('frontend/') || pathStr.endsWith('.jsx') || pathStr.endsWith('.tsx')) return 'var(--accent-emerald)';
+            if (pathStr.includes('src/') || pathStr.includes('components/') || pathStr.includes('pages/') || pathStr.includes('frontend/') || pathStr.endsWith('.jsx') || pathStr.endsWith('.tsx') || pathStr.endsWith('.ts')) return 'var(--accent-emerald)';
             if (pathStr.includes('app/') || pathStr.includes('api/') || pathStr.includes('backend/') || pathStr.endsWith('.py') || pathStr.endsWith('.go')) return 'var(--accent-amber)';
             if (pathStr.endsWith('.json') || pathStr.endsWith('.yaml') || pathStr.endsWith('.md')) return 'var(--accent-slate)';
             return 'var(--text-secondary)';
