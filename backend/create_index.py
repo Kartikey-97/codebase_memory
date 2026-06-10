@@ -1,9 +1,16 @@
 import asyncio
+import os
 from motor.motor_asyncio import AsyncIOMotorClient
 import sys
+from dotenv import load_dotenv
+
+load_dotenv()
 
 async def main():
-    uri = "mongodb+srv://kartikeygupta_db_user:cozh6pFNPKEnlQu9@codebase-memory.ww0plhy.mongodb.net/?appName=codebase-memory"
+    uri = os.environ.get("MONGODB_URI")
+    if not uri:
+        print("MONGODB_URI not found in environment.")
+        return
     client = AsyncIOMotorClient(uri)
     db = client["codebase_memory"]
     
