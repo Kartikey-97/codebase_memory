@@ -44,8 +44,8 @@ and numbers, and the list of affected_files.
    affected_files: []
 
 1. stale_docs
-   Condition: A file has doc_coverage < 0.6 AND has >= 1 inbound dependents.
-   Severity: "warning" if dependents >= 3, otherwise "info".
+   Condition: A file has doc_coverage < 0.2 AND has >= 5 inbound dependents.
+   Severity: "warning" if dependents >= 10, otherwise "info".
    Title format: "Undocumented public interface: <filename>"
    Description: State the exact doc_coverage ratio and dependent count.
 
@@ -78,11 +78,10 @@ and numbers, and the list of affected_files.
    Description: State the exact max_complexity value and the file path.
 
 6. breaking_change_risk
-   Condition: A file has >= 2 inbound dependents AND doc_coverage < 0.6.
-   Severity: "critical" if dependents >= 4 AND doc_coverage < 0.3,
-   "warning" otherwise.
-   Title format: "Breaking change risk: <filename>"
-   Description: State the dependent count and doc_coverage.
+   Condition: A file has >= 8 inbound dependents AND doc_coverage < 0.3.
+   Severity: "critical" if dependents >= 15, "warning" otherwise.
+   Title format: "Core component risk: <filename>"
+   Description: Write a brief analytical explanation of WHY changing this file is risky. For example: "This file is a core dependency relied upon by {dependents} other modules, but lacks proper documentation. Blind modifications could easily trigger cascading failures." Do NOT just restate the numbers.
 
 7. architecture_suggestion
    Condition: Always generate at least 1 architecture suggestion based on the repo overview.

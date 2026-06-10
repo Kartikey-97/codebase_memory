@@ -20,6 +20,10 @@
   /* Accent */
   --accent-amber: #d4843a;
   --accent-amber-dim: #8a5520;
+  --accent-emerald: #2ecc71;
+  --accent-emerald-dim: #1e8449;
+  --accent-slate: #7f8c8d;
+  --accent-slate-dim: #5f6a6a;
 
   /* Severity */
   --severity-critical: #c0392b;
@@ -63,6 +67,10 @@
 
   --accent-amber: #d4843a;
   --accent-amber-dim: #f0cba8;
+  --accent-emerald: #27ae60;
+  --accent-emerald-dim: #abebc6;
+  --accent-slate: #95a5a6;
+  --accent-slate-dim: #d5dbdb;
 
   --severity-critical: #e74c3c;
   --severity-warning: #e67e22;

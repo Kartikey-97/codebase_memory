@@ -42,6 +42,7 @@ function CodebaseMap({ repoId }) {
   const [popover, setPopover] = useState(null);
   const [summary, setSummary] = useState(null);
   const [summarizing, setSummarizing] = useState(false);
+  const [summarizingCluster, setSummarizingCluster] = useState(false);
   const [loading, setLoading] = useState(true);
   const [filterText, setFilterText] = useState('');
   const dataRef = useRef(null);
@@ -140,8 +141,8 @@ function CodebaseMap({ repoId }) {
             const pathStr = f.path.toLowerCase();
             if (pathStr.includes('src/') || pathStr.includes('components/') || pathStr.includes('pages/') || pathStr.includes('frontend/') || pathStr.endsWith('.jsx') || pathStr.endsWith('.tsx')) return 'var(--accent-emerald)';
             if (pathStr.includes('app/') || pathStr.includes('api/') || pathStr.includes('backend/') || pathStr.endsWith('.py') || pathStr.endsWith('.go')) return 'var(--accent-amber)';
-            if (pathStr.endsWith('.json') || pathStr.endsWith('.yaml') || pathStr.endsWith('.md')) return 'var(--text-muted)';
-            return '#4a90e2';
+            if (pathStr.endsWith('.json') || pathStr.endsWith('.yaml') || pathStr.endsWith('.md')) return 'var(--accent-slate)';
+            return 'var(--text-secondary)';
           })(),
           insights: insightsByFile[f.path] || [],
         };
@@ -261,6 +262,7 @@ function CodebaseMap({ repoId }) {
         });
         setSummary(null);
         setSummarizing(false);
+        setSummarizingCluster(false);
       });
 
     svg.on('click', () => setPopover(null));
@@ -301,6 +303,28 @@ function CodebaseMap({ repoId }) {
     }
   };
 
+  const handleSummarizeCluster = async () => {
+    if (!popover || !repoId) return;
+    setSummarizingCluster(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/graph/summarize_cluster`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repo_id: repoId, path: popover.path }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSummary(data.summary);
+      } else {
+        setSummary('Failed to summarize cluster.');
+      }
+    } catch {
+      setSummary('Failed to summarize cluster.');
+    } finally {
+      setSummarizingCluster(false);
+    }
+  };
+
   // ── No-repo placeholder ─────────────────────────────────────
   if (!repoId) {
     return (
@@ -333,7 +357,7 @@ function CodebaseMap({ repoId }) {
             backend
           </span>
           <span className={styles.legendItem}>
-            <span className={styles.legendLine} style={{ background: 'var(--text-muted)', width: '8px', height: '8px', borderRadius: '50%' }} />
+            <span className={styles.legendLine} style={{ background: 'var(--accent-slate)', width: '8px', height: '8px', borderRadius: '50%' }} />
             config
           </span>
         </div>
@@ -413,13 +437,23 @@ function CodebaseMap({ repoId }) {
             {summary ? (
               <div className={styles.summaryText}>{summary}</div>
             ) : (
-              <button 
-                className={styles.summarizeBtn} 
-                onClick={handleSummarize} 
-                disabled={summarizing}
-              >
-                {summarizing ? 'Summarizing...' : 'Summarize File'}
-              </button>
+              <div style={{ display: 'flex', gap: '8px', flexDirection: 'column' }}>
+                <button 
+                  className={styles.summarizeBtn} 
+                  onClick={handleSummarize} 
+                  disabled={summarizing || summarizingCluster}
+                >
+                  {summarizing ? 'Summarizing...' : 'Summarize File'}
+                </button>
+                <button 
+                  className={styles.summarizeBtn} 
+                  onClick={handleSummarizeCluster} 
+                  disabled={summarizing || summarizingCluster}
+                  style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+                >
+                  {summarizingCluster ? 'Summarizing...' : 'Summarize Cluster'}
+                </button>
+              </div>
             )}
           </div>
         </div>
