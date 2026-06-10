@@ -1,0 +1,52 @@
+version: '3.9'
+
+services:
+  mongodb:
+    image: mongo:7
+    container_name: codebase-memory-mongodb
+    restart: unless-stopped
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongodb_data:/data/db
+
+  mcp-bridge:
+    build:
+      context: ./mcp-bridge
+      dockerfile: Dockerfile
+    container_name: codebase-memory-mcp-bridge
+    env_file:
+      - ./backend/.env
+    ports:
+      - '8081:8081'
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: codebase-memory-backend
+    env_file:
+      - ./backend/.env
+    environment:
+      - MONGODB_MCP_URL=http://mcp-bridge:8081
+    ports:
+      - '8000:8080'
+    depends_on:
+      - mcp-bridge
+
+  frontend:
+    image: node:22-alpine
+    container_name: codebase-memory-frontend
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    volumes:
+      - ./frontend:/app
+    env_file:
+      - ./frontend/.env
+    ports:
+      - '5173:5173'
+    depends_on:
+      - backend
+
+volumes:
+  mongodb_data:

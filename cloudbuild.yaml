@@ -1,0 +1,86 @@
+# ── Cloud Build configuration ──────────────────────────────────
+# Builds the backend Docker image, pushes to Artifact Registry,
+# and deploys to Cloud Run.
+#
+# Substitution variables (set via --substitutions or Cloud Build trigger):
+#   _REGION            — Cloud Run region (default: us-central1)
+#   _SERVICE_NAME      — Cloud Run service name
+#   _REPOSITORY        — Artifact Registry repository name
+#
+# All sensitive env vars should be set in Cloud Run via
+# `gcloud run services update` or the console — never committed here.
+
+substitutions:
+  _REGION: us-central1
+  _SERVICE_NAME: codebase-memory-backend
+  _REPOSITORY: codebase-memory
+  _ALLOWED_ORIGINS: "http://localhost:5173,https://codebase-memory.web.app"
+
+steps:
+  # 1. Build the backend Docker image.
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE_NAME}:$SHORT_SHA'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE_NAME}:latest'
+      - './backend'
+
+  # 1b. Build the mcp-bridge Docker image.
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE_NAME}-mcp:$SHORT_SHA'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE_NAME}-mcp:latest'
+      - './mcp-bridge'
+
+  # 2. Push images to Artifact Registry.
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '--all-tags'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE_NAME}'
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '--all-tags'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE_NAME}-mcp'
+
+  # 3. Deploy MCP Bridge and Backend to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "Deploying MCP Bridge..."
+        gcloud run deploy ${_SERVICE_NAME}-mcp \
+          --image ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE_NAME}-mcp:$SHORT_SHA \
+          --region ${_REGION} \
+          --port 8081 \
+          --allow-unauthenticated \
+        
+        echo "Resolving MCP Bridge URL..."
+        MCP_URL=$$(gcloud run services describe ${_SERVICE_NAME}-mcp --region ${_REGION} --format 'value(status.url)')
+        echo "MCP Bridge deployed at: $$MCP_URL"
+        
+        echo "Deploying Backend..."
+        gcloud run deploy ${_SERVICE_NAME} \
+          --image ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE_NAME}:$SHORT_SHA \
+          --region ${_REGION} \
+          --port 8080 \
+          --timeout 3600 \
+          --memory 2Gi \
+          --allow-unauthenticated \
+          --set-env-vars "^|^APP_ENV=production|MONGODB_DB_NAME=codebase_memory|MONGODB_MCP_URL=$$MCP_URL|INGESTION_TMP_DIR=/tmp/codebase-memory|VERTEX_AI_PROJECT=$PROJECT_ID|VERTEX_AI_LOCATION=${_REGION}|VERTEX_AI_MODEL_INGEST=gemini-2.5-flash|VERTEX_AI_MODEL_CHAT=gemini-2.5-pro|VERTEX_AI_STAGING_BUCKET=gs://${_SERVICE_NAME}-staging|ALLOWED_ORIGINS=${_ALLOWED_ORIGINS}" \
+
+images:
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE_NAME}:$SHORT_SHA'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE_NAME}:latest'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE_NAME}-mcp:$SHORT_SHA'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE_NAME}-mcp:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY

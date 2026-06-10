@@ -1,0 +1,212 @@
+/* ── Container ────────────────────────────────────────────────── */
+
+.container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.empty {
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 40px 24px;
+}
+
+/* ── Filter bar ───────────────────────────────────────────────── */
+
+.filterBar {
+  padding: 14px 24px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.severityToggles {
+  display: flex;
+  gap: 6px;
+}
+
+.severityBtn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+
+.severityBtn[data-active='true'] {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
+.severityBtn:hover {
+  color: var(--text-secondary);
+}
+
+.severityDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.severityDot[data-severity='critical'] {
+  background: var(--severity-critical);
+}
+
+.severityDot[data-severity='warning'] {
+  background: var(--severity-warning);
+}
+
+.severityDot[data-severity='info'] {
+  background: var(--severity-info);
+}
+
+.severityDot[data-severity='suggestion'] {
+  background: var(--severity-suggestion);
+}
+
+.typeChips {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.typeChip {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 3px 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+
+.typeChip:hover {
+  color: var(--text-secondary);
+}
+
+.typeChip[data-active='true'] {
+  color: var(--text-primary);
+  border-color: var(--accent-amber-dim);
+}
+
+/* ── Card list ────────────────────────────────────────────────── */
+
+.cardList {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 16px 24px;
+  gap: 2px;
+}
+
+/* ── Insight card ─────────────────────────────────────────────── */
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.card {
+  border-left: 4px solid var(--border);
+  background: var(--bg-surface);
+  padding: 14px 16px;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  cursor: pointer;
+  transition: background 0.12s ease;
+  animation: slideUp 0.15s ease-out both;
+}
+
+.card:hover {
+  background: var(--bg-elevated);
+}
+
+.card[data-severity='critical'] {
+  border-left-color: var(--severity-critical);
+}
+
+.card[data-severity='warning'] {
+  border-left-color: var(--severity-warning);
+}
+
+.card[data-severity='info'] {
+  border-left-color: var(--severity-info);
+}
+
+.card[data-severity='suggestion'] {
+  border-left-color: var(--severity-suggestion);
+  background: var(--bg-elevated);
+}
+
+/* ── Card internals ───────────────────────────────────────────── */
+
+.cardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.cardTitle {
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  line-height: 1.35;
+}
+
+.cardTime {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.cardDesc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+  margin-bottom: 6px;
+}
+
+.cardFiles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.filePath {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.fileMore {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent-amber-dim);
+}

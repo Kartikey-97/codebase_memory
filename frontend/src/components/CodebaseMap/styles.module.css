@@ -1,0 +1,191 @@
+/* ── Container ────────────────────────────────────────────────── */
+
+.container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+  background: var(--bg-base);
+}
+
+.empty {
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 40px 24px;
+}
+
+/* ── SVG canvas ───────────────────────────────────────────────── */
+
+.svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* ── Legend ────────────────────────────────────────────────────── */
+
+.legend {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  display: flex;
+  gap: 20px;
+  padding: 8px 12px;
+  background: rgba(14, 13, 12, 0.85);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  z-index: 2;
+}
+
+.legendSection {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.legendTitle {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.legendItem {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.legendLine {
+  width: 14px;
+  height: 2px;
+  border-radius: 1px;
+}
+
+/* ── Popover ──────────────────────────────────────────────────── */
+
+.popover {
+  position: absolute;
+  z-index: 10;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  min-width: 220px;
+  max-width: 280px;
+  pointer-events: auto;
+  animation: fadeIn 0.12s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.popoverPath {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--accent-amber);
+  margin-bottom: 8px;
+  word-break: break-all;
+}
+
+.popoverRow {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-primary);
+  margin-bottom: 3px;
+}
+
+.popoverLabel {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.popoverInsights {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.popoverInsight {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  margin-top: 3px;
+}
+
+.popoverSummary {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+}
+
+.summarizeBtn {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-size: 11px;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-weight: 500;
+  width: 100%;
+}
+
+.summarizeBtn:hover:not(:disabled) {
+  background: var(--border-subtle);
+  border-color: var(--border-focus);
+}
+
+.summarizeBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.summaryText {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+/* ── Filter ────────────────────────────────────────────────────── */
+
+.filterContainer {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 5;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.filterInput {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 13px;
+  width: 200px;
+  padding: 4px;
+}
+
+.filterInput::placeholder {
+  color: var(--text-muted);
+}
