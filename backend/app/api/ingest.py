@@ -240,8 +240,27 @@ async def ingest_repo(payload: IngestRequest) -> EventSourceResponse:
                 documents=[manifest_doc],
             )
             
+            # Insert pending placeholder insight
+            from datetime import datetime, UTC
+            await mcp_client.insert_many(
+                database=settings.mongodb_db_name,
+                collection="insights",
+                documents=[{
+                    "_id": str(ObjectId()),
+                    "repo_id": repo_id,
+                    "type": "repo_overview",
+                    "severity": "info",
+                    "title": "Architecture Overview",
+                    "description": "Generating repository overview...",
+                    "affected_files": [],
+                    "created_at": datetime.now(UTC).isoformat(),
+                    "resolved": False,
+                    "status": "pending"
+                }]
+            )
+            
             # Fire and forget
-            asyncio.create_task(generate_architecture_summary_async(repo_id, manifest_id, manifest_doc))
+            asyncio.create_task(generate_architecture_summary_async(repo_id, manifest_id, manifest_doc, parsed_by_path, source_by_path))
 
             yield _sse("status", {"phase": "insights", "message": "Queueing insights for background generation..."})
 

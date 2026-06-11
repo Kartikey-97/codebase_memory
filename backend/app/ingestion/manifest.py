@@ -93,36 +93,90 @@ def extract_major_directories(file_paths: list[str]) -> list[str]:
     return sorted(list(dirs))
 
 
-async def generate_architecture_summary_async(repo_id: str, manifest_id: str, manifest_doc: dict[str, Any]) -> None:
+async def generate_architecture_summary_async(repo_id: str, manifest_id: str, manifest_doc: dict[str, Any], parsed_by_path: dict[str, Any], source_by_path: dict[str, str]) -> None:
     from app.config import get_settings
     from app.db.mcp_mongo import create_mcp_client
-    from app.agent.builder import initialize_vertex_ai
-    from vertexai.generative_models import GenerativeModel
+    from app.agent.builder import initialize_vertex_ai, get_ingest_model
+    from datetime import datetime, UTC
     import json
+    
+    settings = get_settings()
+    mcp_client = create_mcp_client()
 
-    try:
-        initialize_vertex_ai()
-        model = GenerativeModel("gemini-1.5-flash")
+    # Priority 1: README
+    readme_content = ""
+    for path, content in source_by_path.items():
+        if path.lower().endswith("readme.md"):
+            # Limit to first 2000 chars to avoid prompt bloat
+            readme_content = content[:2000]
+            break
+
+    # Priority 2: Routes, Models, Controllers, Entities, API
+    important_classes = []
+    important_functions = []
+    
+    # Priority 4: Exported symbols
+    all_exported_symbols = []
+
+    for path, parsed in parsed_by_path.items():
+        lp = path.lower()
+        if any(kw in lp for kw in ["route", "api", "controller", "model", "entity", "service", "schema"]):
+            for cls in parsed.classes:
+                important_classes.append(f"{path}: class {cls.name}")
+            for func in parsed.functions:
+                if func.is_public:
+                    important_functions.append(f"{path}: func {func.name}")
         
-        prompt = f"""
-Analyze the following repository manifest and generate an architecture summary.
+        for exp in parsed.exported_symbols:
+            all_exported_symbols.append(exp)
+
+    # Bound Context
+    important_classes = important_classes[:20]
+    important_functions = important_functions[:20]
+    all_exported_symbols = all_exported_symbols[:50]
+
+    frameworks = manifest_doc.get("frameworks", [])
+
+    # Deterministic Confidence Score
+    confidence = 0.0
+    if readme_content:
+        confidence += 0.4
+    if important_functions or any("route" in path.lower() or "api" in path.lower() for path in parsed_by_path.keys()):
+        confidence += 0.15
+    if important_classes or any("model" in path.lower() or "entity" in path.lower() for path in parsed_by_path.keys()):
+        confidence += 0.15
+    if frameworks:
+        confidence += 0.1
+    
+    # Wait to add business_concepts logic until after generation
+    
+    prompt = f"""
+Analyze the following repository signals and generate a repository overview manifest.
 Do NOT use markdown outside of the requested JSON structure.
 
-Manifest:
-Languages: {manifest_doc.get('detected_languages', [])}
-Frameworks: {[f['name'] for f in manifest_doc.get('frameworks', [])]}
-Entry Points: {manifest_doc.get('entry_points', [])}
+Priority 1 (README snippet):
+{readme_content}
+
+Priority 2 (Key Classes & Functions):
+Classes: {important_classes}
+Functions: {important_functions}
+
+Priority 3 & 4 (Frameworks & Exports):
+Frameworks: {[f['name'] for f in frameworks]}
 Major Directories: {manifest_doc.get('major_directories', [])}
-Important Files: {manifest_doc.get('important_files', [])}
+Top Exported Symbols: {all_exported_symbols}
 
 Task:
 1. Write a 3-4 sentence project overview explaining the core product/domain (What does this project actually do? e.g., 'An e-commerce platform', 'A ridesharing app').
 2. Write a 2-3 sentence architecture summary explaining the technical structure (e.g., 'React frontend communicating with a FastAPI backend').
 3. Group the files into 'architectural_roles' (frontend, backend_api, database).
 4. Extract 5-10 human-readable 'business_concepts' that this codebase implements.
+5. Determine the project_type (e.g., 'Web Application', 'Library', 'CLI Tool') and domain (e.g., 'Finance', 'E-commerce').
 
 Output exactly this JSON format:
 {{
+    "project_type": "...",
+    "domain": "...",
     "architecture_summary": "Project Overview: ...\\n\\nArchitecture: ...",
     "architectural_roles": {{
         "frontend": ["file1", "file2"],
@@ -132,58 +186,102 @@ Output exactly this JSON format:
     "business_concepts": ["concept1", "concept2"]
 }}
 """
+    
+    parsed = {}
+    last_error = ""
+    retry_count = 0
+    success = False
+
+    try:
+        initialize_vertex_ai()
+        model = get_ingest_model()
+        
         for attempt in range(3):
+            retry_count = attempt
             try:
                 result = await asyncio.to_thread(model.generate_content, prompt)
+                text = result.text.strip()
+                if text.startswith("```json"):
+                    text = text[7:]
+                if text.startswith("```"):
+                    text = text[3:]
+                if text.endswith("```"):
+                    text = text[:-3]
+                
+                parsed = json.loads(text.strip())
+                success = True
                 break
             except Exception as exc:
+                last_error = str(exc)
                 if "429" in str(exc) and attempt < 2:
                     await asyncio.sleep(2 ** attempt)
                     continue
-                raise
-        
-        text = result.text.strip()
-        if text.startswith("```json"):
-            text = text[7:]
-        if text.startswith("```"):
-            text = text[3:]
-        if text.endswith("```"):
-            text = text[:-3]
-        
-        parsed = json.loads(text.strip())
-        
-        settings = get_settings()
-        mcp_client = create_mcp_client()
-        
+                if attempt == 2:
+                    break
+
+        if success:
+            if parsed.get("business_concepts"):
+                confidence += 0.2
+            confidence = min(confidence, 1.0)
+            
+            await mcp_client.update_many(
+                database=settings.mongodb_db_name,
+                collection="repo_manifests",
+                filter_query={"_id": manifest_id},
+                update_query={
+                    "$set": {
+                        "project_type": parsed.get("project_type", ""),
+                        "domain": parsed.get("domain", ""),
+                        "architecture_summary": parsed.get("architecture_summary", ""),
+                        "architectural_roles": parsed.get("architectural_roles", {}),
+                        "business_concepts": parsed.get("business_concepts", []),
+                        "confidence_score": confidence,
+                        "extraction_timestamp": datetime.now(UTC).isoformat()
+                    }
+                }
+            )
+            
+            # Update the pending insight to complete
+            await mcp_client.update_many(
+                database=settings.mongodb_db_name,
+                collection="insights",
+                filter_query={"repo_id": repo_id, "type": "repo_overview"},
+                update_query={
+                    "$set": {
+                        "status": "complete",
+                        "description": parsed.get("architecture_summary", "")
+                    }
+                }
+            )
+        else:
+            # Failed
+            await mcp_client.update_many(
+                database=settings.mongodb_db_name,
+                collection="insights",
+                filter_query={"repo_id": repo_id, "type": "repo_overview"},
+                update_query={
+                    "$set": {
+                        "status": "failed",
+                        "description": f"Repository overview generation failed after {retry_count+1} attempts. Error: {last_error}",
+                        "retry_count": retry_count + 1,
+                        "last_error": last_error,
+                        "last_attempt_at": datetime.now(UTC).isoformat()
+                    }
+                }
+            )
+
+    except Exception as exc:
+        print(f"Failed to generate architecture summary asynchronously: {exc}")
         await mcp_client.update_many(
             database=settings.mongodb_db_name,
-            collection="repo_manifests",
-            filter_query={"_id": manifest_id},
+            collection="insights",
+            filter_query={"repo_id": repo_id, "type": "repo_overview"},
             update_query={
                 "$set": {
-                    "architecture_summary": parsed.get("architecture_summary", ""),
-                    "architectural_roles": parsed.get("architectural_roles", {}),
-                    "business_concepts": parsed.get("business_concepts", [])
+                    "status": "failed",
+                    "description": f"Repository overview generation failed catastrophically: {exc}",
+                    "last_error": str(exc),
+                    "last_attempt_at": datetime.now(UTC).isoformat()
                 }
             }
         )
-        
-        from datetime import datetime, UTC
-        from bson import ObjectId
-        await mcp_client.insert_many(
-            database=settings.mongodb_db_name,
-            collection="insights",
-            documents=[{
-                "_id": str(ObjectId()),
-                "repo_id": repo_id,
-                "type": "repo_overview",
-                "severity": "info",
-                "title": "Architecture Overview",
-                "description": parsed.get("architecture_summary", ""),
-                "affected_files": [],
-                "created_at": datetime.now(UTC).isoformat(),
-                "resolved": False
-            }]
-        )
-    except Exception as exc:
-        print(f"Failed to generate architecture summary asynchronously: {exc}")

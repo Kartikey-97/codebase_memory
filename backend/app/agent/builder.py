@@ -37,6 +37,13 @@ def initialize_vertex_ai() -> None:
 
     vertexai.init(**init_kwargs)
 
+def get_ingest_model() -> Any:
+    from vertexai.generative_models import GenerativeModel
+    return GenerativeModel(get_settings().vertex_ai_model_ingest)
+
+def get_chat_model() -> Any:
+    from vertexai.generative_models import GenerativeModel
+    return GenerativeModel(get_settings().vertex_ai_model_chat)
 
 def build_local_agent(repo_id: str) -> reasoning_engines.LangchainAgent:
     """Build a local Langchain agent with typed Python tools for a single request scope."""

@@ -82,10 +82,30 @@ async def chat(payload: ChatRequest) -> EventSourceResponse:
                 )
                 return
 
+            # Check if this is an overview query
+            is_overview_query = any(kw in payload.message.lower() for kw in ["what does this repo do", "tell me about this repo", "overview", "explain the architecture", "what is this project", "summarize the repo"])
+            
+            repo_context_str = ""
+            if is_overview_query:
+                try:
+                    from app.db.mcp_mongo import create_mcp_client
+                    mcp_client_instance = create_mcp_client()
+                    manifest = await mcp_client_instance.find_one(
+                        database=settings.mongodb_db_name,
+                        collection="repo_manifests",
+                        filter_query={"repo_id": payload.repo_id}
+                    )
+                    if manifest and manifest.get("confidence_score", 0.0) >= 0.2:
+                        repo_context_str = f"Repository Context:\nDomain: {manifest.get('domain', '')}\nOverview: {manifest.get('architecture_summary', '')}\nBusiness Concepts: {manifest.get('business_concepts', [])}\n\nNote: If this context does not fully answer the user's question, use your tools to perform a vector search fallback.\n\n"
+                except Exception as e:
+                    import logging
+                    logging.warning(f"Failed to fetch manifest for chat: {e}")
+
             # Build the full prompt with conversation history for context.
             full_prompt = _build_prompt_with_history(
                 message=payload.message,
                 history=payload.history,
+                repo_context=repo_context_str
             )
 
             # Run agent in a thread to avoid blocking the event loop.
@@ -243,16 +263,22 @@ def _build_prompt_with_history(
     *,
     message: str,
     history: list[ChatMessage],
+    repo_context: str = ""
 ) -> str:
     """Build a single prompt string incorporating conversation history.
 
     The agent is stateless — history is serialised into the prompt so
     the model can maintain conversational context.
     """
+    parts = []
+    if repo_context:
+        parts.append(repo_context)
+        
     if not history:
-        return message
+        parts.append(message)
+        return "\n".join(parts)
 
-    parts: list[str] = ["Previous conversation for context:"]
+    parts.append("Previous conversation for context:")
     for msg in history[-10:]:  # Keep last 10 messages to stay within context window.
         role_label = "User" if msg.role == "user" else "Assistant"
         parts.append(f"{role_label}: {msg.content}")

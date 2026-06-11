@@ -16,13 +16,16 @@ function App() {
   const [syncProgress, setSyncProgress] = useState({ active: false, progress: 0, label: '', startTime: null });
   const [lastSynced, setLastSynced] = useState(null);
   const [syncing, setSyncing] = useState(false);
-  const [theme, setTheme] = useState('dark');
+  const [theme, setTheme] = useState(() => {
+    return localStorage.getItem('theme') || 'light';
+  });
 
   const repoId = repo?.repoId;
   const repoName = repo?.repoName;
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('theme', theme);
   }, [theme]);
 
   const toggleTheme = () => {
