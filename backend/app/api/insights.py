@@ -202,7 +202,16 @@ def _run_insight_agent(*, repo_id: str, task_prompt: str) -> dict[str, Any]:
         system_instruction=system_prompt,
     )
 
-    response = agent.query(input=task_prompt)
+    import time
+    for attempt in range(3):
+        try:
+            response = agent.query(input=task_prompt)
+            break
+        except Exception as exc:
+            if "429" in str(exc) and attempt < 2:
+                time.sleep(2 ** attempt)
+                continue
+            raise
 
     if isinstance(response, dict):
         return response

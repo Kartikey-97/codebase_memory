@@ -131,7 +131,15 @@ Output exactly this JSON format:
     "business_concepts": ["concept1", "concept2"]
 }}
 """
-        result = await asyncio.to_thread(model.generate_content, prompt)
+        for attempt in range(3):
+            try:
+                result = await asyncio.to_thread(model.generate_content, prompt)
+                break
+            except Exception as exc:
+                if "429" in str(exc) and attempt < 2:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                raise
         
         text = result.text.strip()
         if text.startswith("```json"):

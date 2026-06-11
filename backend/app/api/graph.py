@@ -98,11 +98,15 @@ async def summarize_file(payload: SummarizeRequest) -> dict[str, Any]:
     model = GenerativeModel("gemini-2.5-flash")
     prompt = f"Summarize the purpose of this file in 1 or 2 concise sentences. Do not use markdown or formatting. File path: {payload.path}\n\nCode:\n{content}"
     
-    try:
-        result = await asyncio.to_thread(model.generate_content, prompt)
-        return {"summary": result.text.strip()}
-    except Exception as exc:
-        return {"summary": f"Failed to generate summary: {exc}"}
+    for attempt in range(3):
+        try:
+            result = await asyncio.to_thread(model.generate_content, prompt)
+            return {"summary": result.text.strip()}
+        except Exception as exc:
+            if "429" in str(exc) and attempt < 2:
+                await asyncio.sleep(2 ** attempt)
+                continue
+            return {"summary": f"Failed to generate summary: {exc}"}
 
 @router.post("/graph/summarize_cluster")
 async def summarize_cluster(payload: SummarizeRequest) -> dict[str, Any]:
@@ -161,9 +165,13 @@ async def summarize_cluster(payload: SummarizeRequest) -> dict[str, Any]:
     model = GenerativeModel("gemini-2.5-flash")
     prompt = f"Summarize the collective purpose and interaction of this cluster of connected files in 2 or 3 concise sentences. The central file is {payload.path}. Do not use markdown or formatting.\n\nCode context:\n{content}"
     
-    try:
-        result = await asyncio.to_thread(model.generate_content, prompt)
-        return {"summary": result.text.strip()}
-    except Exception as exc:
-        return {"summary": f"Failed to generate cluster summary: {exc}"}
+    for attempt in range(3):
+        try:
+            result = await asyncio.to_thread(model.generate_content, prompt)
+            return {"summary": result.text.strip()}
+        except Exception as exc:
+            if "429" in str(exc) and attempt < 2:
+                await asyncio.sleep(2 ** attempt)
+                continue
+            return {"summary": f"Failed to generate cluster summary: {exc}"}
 

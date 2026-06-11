@@ -33,7 +33,7 @@ def clone_repo_to_temp(url: str, dest: str) -> dict[str, Any]:
     clone_target = clone_parent / f"repo_clone_{uuid4().hex}"
 
     try:
-        repo = Repo.clone_from(url, clone_target)
+        repo = Repo.clone_from(url, clone_target, depth=1, single_branch=True)
         default_branch = _get_default_branch_name(repo)
         tracked_files = [path for path in repo.git.ls_files().splitlines() if path.strip()]
         if len(tracked_files) > MAX_FILE_COUNT:
@@ -105,7 +105,7 @@ def clone_repo(url: str, dest: str) -> dict[str, Any]:
     repo: Repo | None = None
     try:
         try:
-            repo = Repo.clone_from(url, clone_target)
+            repo = Repo.clone_from(url, clone_target, depth=1, single_branch=True)
         except GitCommandError as exc:
             return _clone_error_response(exc)
 
