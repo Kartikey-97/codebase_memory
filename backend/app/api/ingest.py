@@ -19,6 +19,8 @@ from app.ingestion.parser import ParsedFile, parse_file
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 
+_background_tasks = set()
+
 
 class IngestRequest(BaseModel):
     url: str
@@ -273,8 +275,27 @@ async def ingest_repo(payload: IngestRequest) -> EventSourceResponse:
                         await asyncio.to_thread(_run_insight_agent, repo_id=repo_id, task_prompt=task_prompt)
                     except Exception as e:
                         print(f"Background insight generation failed: {e}")
+                        import traceback
+                        await mcp_client.insert_many(
+                            database=settings.mongodb_db_name,
+                            collection="insights",
+                            documents=[{
+                                "_id": str(ObjectId()),
+                                "repo_id": repo_id,
+                                "type": "error",
+                                "severity": "critical",
+                                "title": "Insight Generation Failed",
+                                "description": f"Exception: {str(e)[:200]}... Traceback: {traceback.format_exc()[-500:]}",
+                                "affected_files": [],
+                                "created_at": datetime.now(UTC).isoformat(),
+                                "resolved": False,
+                                "status": "failed"
+                            }]
+                        )
                         
-                asyncio.create_task(fire_and_forget_insights())
+                task = asyncio.create_task(fire_and_forget_insights())
+                _background_tasks.add(task)
+                task.add_done_callback(_background_tasks.discard)
             except Exception as exc:
                 insight_failed = True
                 yield _sse("error", {"message": f"Insight queueing failed: {exc}"})
