@@ -45,18 +45,19 @@ def get_chat_model() -> Any:
     from vertexai.generative_models import GenerativeModel
     return GenerativeModel(get_settings().vertex_ai_model_chat)
 
-def build_local_agent(repo_id: str) -> reasoning_engines.LangchainAgent:
+from langchain_google_vertexai import ChatVertexAI
+from langgraph.prebuilt import create_react_agent
+
+def build_local_agent(repo_id: str) -> Any:
     """Build a local Langchain agent with typed Python tools for a single request scope."""
     initialize_vertex_ai()
     settings = get_settings()
     tool_callables, _ = build_tool_callables(repo_id=repo_id)
 
-    # Tool callables are Python functions/methods with full type annotations in tools.py.
-    return reasoning_engines.LangchainAgent(
-        model=settings.vertex_ai_model_ingest,
-        tools=tool_callables,
-        system_instruction=SYSTEM_INSTRUCTION,
-    )
+    llm = ChatVertexAI(model=settings.vertex_ai_model_ingest, temperature=0.1)
+    
+    agent = create_react_agent(llm, tools=tool_callables, state_modifier=SYSTEM_INSTRUCTION)
+    return agent
 
 
 def deploy_reasoning_engine(
@@ -88,10 +89,10 @@ def query_agent_once(repo_id: str, message: str) -> dict[str, Any]:
     """
     local_agent = build_local_agent(repo_id=repo_id)
 
-    response = local_agent.query(input=message)
+    result = local_agent.invoke({"messages": [("user", message)]})
+    last_msg = result["messages"][-1]
+    response = last_msg.content
 
-    if isinstance(response, dict):
-        return response
     return {"output": response}
 
 
@@ -113,7 +114,7 @@ CHAT_SYSTEM_INSTRUCTION = (
 
 def build_chat_agent(
     repo_id: str,
-) -> tuple[reasoning_engines.LangchainAgent, "CodebaseAgentTools"]:
+) -> tuple[Any, "CodebaseAgentTools"]:
     """Build a chat agent and return (agent, tools_instance).
 
     The tools instance is returned so the caller can read
@@ -125,9 +126,7 @@ def build_chat_agent(
     settings = get_settings()
     tool_callables, tools_instance = build_tool_callables(repo_id=repo_id)
 
-    agent = reasoning_engines.LangchainAgent(
-        model=settings.vertex_ai_model_chat,
-        tools=tool_callables,
-        system_instruction=CHAT_SYSTEM_INSTRUCTION,
-    )
+    llm = ChatVertexAI(model=settings.vertex_ai_model_chat, temperature=0.2)
+    agent = create_react_agent(llm, tools=tool_callables, state_modifier=CHAT_SYSTEM_INSTRUCTION)
+    
     return agent, tools_instance

@@ -189,26 +189,24 @@ async def list_insights(
 def _run_insight_agent(*, repo_id: str, task_prompt: str) -> dict[str, Any]:
     """Run the insight agent synchronously (called from asyncio.to_thread)."""
     initialize_vertex_ai()
-    from vertexai.preview import reasoning_engines  # noqa: F811 — re-import is intentional
 
     from app.agent.prompts import INSIGHT_SYSTEM_PROMPT as system_prompt
     from app.agent.tools import build_tool_callables
+    from langchain_google_vertexai import ChatVertexAI
+    from langgraph.prebuilt import create_react_agent
 
     tools, _ = build_tool_callables(repo_id=repo_id)
 
     from app.config import get_settings
     settings = get_settings()
 
-    agent = reasoning_engines.LangchainAgent(
-        model=settings.vertex_ai_model_ingest,
-        tools=tools,
-        system_instruction=system_prompt,
-    )
+    llm = ChatVertexAI(model=settings.vertex_ai_model_ingest, temperature=0.1)
+    agent = create_react_agent(llm, tools=tools, state_modifier=system_prompt)
 
     import time
     for attempt in range(3):
         try:
-            response = agent.query(input=task_prompt)
+            result = agent.invoke({"messages": [("user", task_prompt)]})
             break
         except Exception as exc:
             if "429" in str(exc) and attempt < 2:
@@ -216,9 +214,8 @@ def _run_insight_agent(*, repo_id: str, task_prompt: str) -> dict[str, Any]:
                 continue
             raise
 
-    if isinstance(response, dict):
-        return response
-    return {"output": response}
+    last_msg = result["messages"][-1]
+    return {"output": last_msg.content}
 
 
 async def _cap_insights(

@@ -1,5 +1,18 @@
 import asyncio
 from app.config import get_settings
+
+# MONKEY PATCH PYDANTIC V1
+try:
+    import pydantic.v1.validators
+    original_find_validators = pydantic.v1.validators.find_validators
+    def safe_find_validators(type_, config):
+        if type(type_).__name__ == "TypeAliasType":
+            return []
+        return original_find_validators(type_, config)
+    pydantic.v1.validators.find_validators = safe_find_validators
+except ImportError:
+    pass
+
 from app.agent.builder import initialize_vertex_ai
 from app.api.insights import build_insight_task_prompt, _run_insight_agent
 from app.db.mcp_mongo import create_mcp_client

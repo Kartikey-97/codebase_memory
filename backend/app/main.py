@@ -1,5 +1,20 @@
 from contextlib import asynccontextmanager
 
+# --- PYDANTIC V1 MONKEY PATCH FOR TYPEALIASTYPE BUG ---
+try:
+    import pydantic.v1.fields
+    import pydantic.v1.validators
+    original_find_validators = pydantic.v1.validators.find_validators
+    def safe_find_validators(type_, config):
+        if type(type_).__name__ == "TypeAliasType":
+            return []
+        return original_find_validators(type_, config)
+    pydantic.v1.validators.find_validators = safe_find_validators
+    pydantic.v1.fields.find_validators = safe_find_validators
+except ImportError:
+    pass
+# --------------------------------------------------------
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
