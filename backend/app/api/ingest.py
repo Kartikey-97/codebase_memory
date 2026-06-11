@@ -89,6 +89,7 @@ async def ingest_repo(payload: IngestRequest) -> EventSourceResponse:
 
             files_collection_docs: list[dict[str, Any]] = []
             chunks_collection_docs: list[dict[str, Any]] = []
+            skeletons_collection_docs: list[dict[str, Any]] = []
             parsed_by_path: dict[str, ParsedFile] = {}
             source_by_path: dict[str, str] = {}
 
@@ -133,6 +134,50 @@ async def ingest_repo(payload: IngestRequest) -> EventSourceResponse:
                 chunk_docs = _build_chunk_documents(repo_id=repo_id, file_id=file_id, chunks=chunks)
                 chunks_collection_docs.extend(chunk_docs)
 
+                # Construct File Skeleton
+                defined_symbols = []
+                for cls in parsed_file.classes:
+                    defined_symbols.append({"name": cls.name, "type": "class"})
+                for func in parsed_file.functions:
+                    defined_symbols.append({"name": func.name, "type": "function"})
+
+                skeleton_doc = {
+                    "_id": str(ObjectId()),
+                    "repo_id": repo_id,
+                    "file_id": file_id,
+                    "path": rel_path,
+                    "file_purpose": parsed_file.file_purpose,
+                    "has_docs": doc_coverage > 0,
+                    "complexity_score": max_complexity,
+                    "defined_symbols": defined_symbols,
+                    "exported_symbols": parsed_file.exported_symbols,
+                    "imported_modules": [
+                        {"module": imp.raw, "symbols": imp.symbols} for imp in parsed_file.imports
+                    ],
+                    "classes": [
+                        {
+                            "name": cls.name,
+                            "base_classes": cls.base_classes,
+                            "methods": [
+                                {
+                                    "name": m.name,
+                                    "signature": m.signature,
+                                    "is_public": m.is_public
+                                } for m in cls.methods
+                            ]
+                        } for cls in parsed_file.classes
+                    ],
+                    "functions": [
+                        {
+                            "name": func.name,
+                            "signature": func.signature,
+                            "is_public": func.is_public,
+                            "is_async": False  # To be extracted later if needed
+                        } for func in parsed_file.functions
+                    ]
+                }
+                skeletons_collection_docs.append(skeleton_doc)
+
                 if index % 25 == 0 or index == len(parse_targets):
                     yield _sse(
                         "status",
@@ -150,6 +195,13 @@ async def ingest_repo(payload: IngestRequest) -> EventSourceResponse:
                     database=settings.mongodb_db_name,
                     collection="files",
                     documents=files_collection_docs,
+                )
+                
+            if skeletons_collection_docs:
+                await mcp_client.insert_many(
+                    database=settings.mongodb_db_name,
+                    collection="file_skeletons",
+                    documents=skeletons_collection_docs,
                 )
 
             yield _sse(
@@ -178,6 +230,47 @@ async def ingest_repo(payload: IngestRequest) -> EventSourceResponse:
                     collection="relationships",
                     documents=relationships_docs,
                 )
+
+            yield _sse("status", {"phase": "manifest", "message": "Generating repository manifest..."})
+            from app.ingestion.manifest import (
+                detect_frameworks,
+                detect_entry_points,
+                extract_major_directories,
+                identify_key_files,
+                generate_architecture_summary_async
+            )
+            
+            manifest_id = str(ObjectId())
+            detected_languages = list(set([doc.get("language") for doc in files_collection_docs if doc.get("language")]))
+            file_paths = [doc.get("path") for doc in files_collection_docs]
+            
+            frameworks = await asyncio.to_thread(detect_frameworks, source_by_path)
+            entry_points = await asyncio.to_thread(detect_entry_points, file_paths)
+            major_directories = await asyncio.to_thread(extract_major_directories, file_paths)
+            important_files = await asyncio.to_thread(identify_key_files, file_paths)
+            
+            manifest_doc = {
+                "_id": manifest_id,
+                "repo_id": repo_id,
+                "detected_languages": detected_languages,
+                "frameworks": frameworks,
+                "entry_points": entry_points,
+                "major_directories": major_directories,
+                "important_files": important_files,
+                "architectural_roles": {},
+                "architecture_summary": "Generating...",
+                "graph_rag_ready": False
+            }
+            
+            await mcp_client.insert_many(
+                database=settings.mongodb_db_name,
+                collection="repo_manifests",
+                documents=[manifest_doc],
+            )
+            
+            # Fire and forget
+            asyncio.create_task(generate_architecture_summary_async(repo_id, manifest_id, manifest_doc))
+
             yield _sse("status", {"phase": "insights", "message": "Generating insights..."})
 
             insight_failed = False

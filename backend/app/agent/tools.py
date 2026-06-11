@@ -171,6 +171,235 @@ class CodebaseAgentTools:
             for doc in documents
         ]
 
+    def get_repo_manifest(self) -> dict[str, Any]:
+        """Fetch the high-level repository manifest containing architecture, frameworks, and entry points. Use this tool FIRST when asked for a repository overview."""
+        response = _run_async(
+            self._mcp_client.find(
+                database=self._db_name,
+                collection="repo_manifests",
+                filter_query={"repo_id": self.repo_id},
+                limit=1,
+            )
+        )
+        documents = _extract_documents(response)
+        if not documents:
+            return {"error": "Manifest not found. You must rely on vector search."}
+        
+        doc = documents[0]
+        # Remove mongo id
+        doc.pop("_id", None)
+        return doc
+
+    def get_file_skeleton(self, file_path: str) -> dict[str, Any]:
+        """Fetch the architectural skeleton of a file (signatures, imports, exports) without loading the full source code. Use this when you need to know what a file exposes or imports."""
+        response = _run_async(
+            self._mcp_client.find(
+                database=self._db_name,
+                collection="file_skeletons",
+                filter_query={"repo_id": self.repo_id, "path": file_path},
+                limit=1,
+            )
+        )
+        documents = _extract_documents(response)
+        if not documents:
+            return {"error": "Skeleton not found."}
+        
+        doc = documents[0]
+        # Remove mongo id
+        doc.pop("_id", None)
+        return doc
+
+    def find_subsystem_entrypoint(self, concept: str) -> dict[str, Any]:
+        """Identify the most likely entry point file for a specific architectural concept (e.g., 'authentication', 'database')."""
+        manifest_response = _run_async(
+            self._mcp_client.find(
+                database=self._db_name,
+                collection="repo_manifests",
+                filter_query={"repo_id": self.repo_id},
+                limit=1,
+            )
+        )
+        manifests = _extract_documents(manifest_response)
+        if manifests:
+            manifest = manifests[0]
+            roles = manifest.get("architectural_roles", {})
+            for role_name, files in roles.items():
+                if concept.lower() in role_name.lower() and files:
+                    return {"entry_point": files[0], "reason": f"Matched architectural role '{role_name}'"}
+
+        skel_response = _run_async(
+            self._mcp_client.find(
+                database=self._db_name,
+                collection="file_skeletons",
+                filter_query={"repo_id": self.repo_id},
+                limit=1000,
+            )
+        )
+        skeletons = _extract_documents(skel_response)
+        
+        best_match = None
+        highest_score = 0
+        concept_lower = concept.lower()
+        
+        for skel in skeletons:
+            score = 0
+            path = skel.get("path", "").lower()
+            purpose = skel.get("file_purpose", "").lower()
+            
+            if concept_lower in path:
+                score += 5
+            if concept_lower in purpose:
+                score += 3
+            for sym in skel.get("exported_symbols", []):
+                if concept_lower in sym.lower():
+                    score += 2
+            
+            if score > highest_score:
+                highest_score = score
+                best_match = skel.get("path")
+                
+        if best_match:
+            return {"entry_point": best_match, "reason": "Matched via file purpose and exported symbols."}
+        return {"error": "Could not identify an entry point for this concept. Try search_symbols."}
+
+    def analyze_subsystem(self, entry_file: str, max_depth: int = 2) -> str:
+        """Perform downstream traversal (Subsystem Analysis) starting from an entry point. Uses batch fetching to prevent N+1 Mongo queries."""
+        visited = set([entry_file])
+        frontier = [entry_file]
+        
+        summary_lines = [f"# Subsystem Analysis: `{entry_file}` (Max Depth: {max_depth})\n"]
+        current_tokens = 0
+        MAX_TOKENS = 20000
+        
+        for depth in range(max_depth + 1):
+            if not frontier:
+                break
+            if current_tokens > MAX_TOKENS:
+                summary_lines.append("\n> [!WARNING]\n> Token budget exceeded. Traversal truncated.")
+                break
+                
+            summary_lines.append(f"## Level {depth} Dependencies")
+            
+            # Batch fetch skeletons
+            skel_resp = _run_async(
+                self._mcp_client.find(
+                    database=self._db_name,
+                    collection="file_skeletons",
+                    filter_query={"repo_id": self.repo_id, "path": {"$in": frontier}},
+                    limit=len(frontier)
+                )
+            )
+            skeletons = _extract_documents(skel_resp)
+            next_frontier = []
+            
+            for skel in skeletons:
+                path = skel.get("path")
+                purpose = skel.get("file_purpose", "No purpose extracted.")
+                exports = skel.get("exported_symbols", [])
+                
+                block = f"**File:** `{path}`\n**Purpose:** {purpose}\n**Exported Symbols:** {', '.join(exports) if exports else 'None'}\n"
+                classes = skel.get("classes", [])
+                functions = skel.get("functions", [])
+                
+                if classes or functions:
+                    block += "**Classes/Functions:**\n"
+                    for cls in classes:
+                        block += f"- `class {cls.get('name')}`\n"
+                        for method in cls.get("methods", []):
+                            block += f"  - `{method.get('name')}{method.get('signature', '()')}`\n"
+                    for func in functions:
+                        block += f"- `{func.get('name')}{func.get('signature', '()')}`\n"
+                        
+                summary_lines.append(block)
+                current_tokens += len(block) // 4
+                if current_tokens > MAX_TOKENS:
+                    break
+            
+            if current_tokens > MAX_TOKENS or depth == max_depth:
+                break
+                
+            # Batch fetch outward edges
+            rel_resp = _run_async(
+                self._mcp_client.find(
+                    database=self._db_name,
+                    collection="relationships",
+                    filter_query={"repo_id": self.repo_id, "from_file": {"$in": frontier}, "_deleted": {"$ne": True}},
+                    limit=500
+                )
+            )
+            edges = _extract_documents(rel_resp)
+            
+            edge_map = {}
+            for edge in edges:
+                ff = edge.get("from_file")
+                tf = edge.get("to_file")
+                if not tf or tf in visited:
+                    continue
+                if ff not in edge_map:
+                    edge_map[ff] = []
+                edge_map[ff].append(edge)
+                
+            for ff, f_edges in edge_map.items():
+                f_edges = sorted(f_edges, key=lambda e: e.get("weight", 0), reverse=True)[:5]
+                for edge in f_edges:
+                    tf = edge.get("to_file")
+                    if tf and tf not in visited:
+                        visited.add(tf)
+                        next_frontier.append(tf)
+            
+            frontier = next_frontier
+            
+        return "\n".join(summary_lines)
+
+    def search_symbols(self, symbol_name: str) -> list[dict[str, Any]]:
+        """Search the entire repository to find exactly which file defines a specific symbol (class or function)."""
+        response = _run_async(
+            self._mcp_client.find(
+                database=self._db_name,
+                collection="file_skeletons",
+                filter_query={
+                    "repo_id": self.repo_id,
+                    "defined_symbols.name": symbol_name
+                },
+                limit=10,
+            )
+        )
+        documents = _extract_documents(response)
+        results = []
+        for doc in documents:
+            results.append({
+                "path": doc.get("path"),
+                "file_purpose": doc.get("file_purpose"),
+                "matches": [s for s in doc.get("defined_symbols", []) if s.get("name") == symbol_name]
+            })
+        return results
+
+    def find_related_files(self, file_path: str, limit: int = 20) -> dict[str, Any]:
+        """Perform upstream traversal (Impact Analysis) to find files that depend on the target file. Incorporates Hub Detection."""
+        response = _run_async(
+            self._mcp_client.find(
+                database=self._db_name,
+                collection="relationships",
+                filter_query={"repo_id": self.repo_id, "to_file": file_path, "_deleted": {"$ne": True}},
+                limit=limit + 50,  # Query more to detect hubs
+            )
+        )
+        edges = _extract_documents(response)
+        
+        if len(edges) > 50:
+             return {
+                 "hub_detected": True,
+                 "message": f"Global Hub Detected: '{file_path}' has {len(edges)} inbound dependencies. Upstream traversal halted to prevent graph explosion.",
+                 "dependents_count": len(edges)
+             }
+             
+        dependents = [edge.get("from_file") for edge in edges[:limit]]
+        return {
+            "target": file_path,
+            "dependents": dependents,
+            "total_found": len(dependents)
+        }
+
     def write_insight(self, insight: dict[str, Any]) -> dict[str, Any]:
         """Persist an insight document for this repo."""
         payload = {
@@ -212,6 +441,12 @@ def build_tool_callables(
         tools.list_high_risk_files,
         tools.get_high_complexity_files,
         tools.write_insight,
+        tools.get_repo_manifest,
+        tools.get_file_skeleton,
+        tools.search_symbols,
+        tools.find_subsystem_entrypoint,
+        tools.analyze_subsystem,
+        tools.find_related_files,
     ]
     return callables, tools
 

@@ -65,25 +65,34 @@ JS_TS_COMPLEXITY_NODES = {
 
 
 @dataclass(slots=True)
+class ParsedMethod:
+    name: str
+    signature: str
+    is_public: bool
+
+@dataclass(slots=True)
 class ParsedFunction:
     name: str
     start_line: int
     end_line: int
     has_docstring: bool
     cyclomatic_complexity: int
-
+    signature: str = ""
+    is_public: bool = True
 
 @dataclass(slots=True)
 class ParsedClass:
     name: str
     start_line: int
     end_line: int
-
+    methods: list[ParsedMethod] = field(default_factory=list)
+    base_classes: list[str] = field(default_factory=list)
 
 @dataclass(slots=True)
 class ParsedImport:
     raw: str
     resolved_path: str | None = None
+    symbols: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -94,6 +103,8 @@ class ParsedFile:
     classes: list[ParsedClass] = field(default_factory=list)
     imports: list[ParsedImport] = field(default_factory=list)
     parse_mode: str = "ast"
+    file_purpose: str = ""
+    exported_symbols: list[str] = field(default_factory=list)
 
 
 def parse_file(file_path: str | Path, repo_root: str | Path | None = None) -> ParsedFile:
@@ -143,12 +154,26 @@ def _parse_with_tree_sitter(
 ) -> ParsedFile:
     parsed = ParsedFile(path=relative_path, language=language, parse_mode="ast")
 
+    # Extract module docstring for file_purpose
+    if language == "python":
+        children = _node_children(root_node)
+        if children and _node_kind(children[0]) == "expression_statement":
+            expr_children = _node_children(children[0])
+            if expr_children and _node_kind(expr_children[0]) in {"string", "concatenated_string"}:
+                parsed.file_purpose = _node_text(expr_children[0], source_bytes).strip().strip('"""').strip("'''").strip()
+    elif language in {"javascript", "typescript"}:
+        match = re.search(r"^\s*/\*\*([\s\S]*?)\*/", source_text)
+        if match:
+            parsed.file_purpose = match.group(1).replace("*", "").strip()
+
     for node in _walk_tree(root_node):
         node_kind = _node_kind(node)
 
         if _is_function_node(language, node_kind):
             name = _get_function_name(node=node, source_bytes=source_bytes, language=language)
             if name:
+                is_public = not name.startswith("_") if language == "python" else True
+                signature = _extract_signature(node, source_bytes)
                 parsed.functions.append(
                     ParsedFunction(
                         name=name,
@@ -163,23 +188,38 @@ def _parse_with_tree_sitter(
                         cyclomatic_complexity=_estimate_cyclomatic_complexity(
                             function_node=node, language=language
                         ),
+                        signature=signature,
+                        is_public=is_public,
                     )
                 )
 
         if _is_class_node(language, node_kind):
             class_name = _node_text(node.child_by_field_name("name"), source_bytes).strip()
             if class_name:
+                methods = []
+                body_node = node.child_by_field_name("body")
+                if body_node:
+                    for child in _node_children(body_node):
+                        if _is_function_node(language, _node_kind(child)):
+                            method_name = _get_function_name(node=child, source_bytes=source_bytes, language=language)
+                            if method_name:
+                                m_is_public = not method_name.startswith("_") if language == "python" else True
+                                m_signature = _extract_signature(child, source_bytes)
+                                methods.append(ParsedMethod(name=method_name, signature=m_signature, is_public=m_is_public))
+                
                 parsed.classes.append(
                     ParsedClass(
                         name=class_name,
                         start_line=_node_start_row(node) + 1,
                         end_line=_node_end_row(node) + 1,
+                        methods=methods
                     )
                 )
 
         if _is_import_node(language, node_kind):
             raw_import = _node_text(node, source_bytes).strip()
             if raw_import:
+                symbols = _extract_imported_symbols(node, source_bytes, language)
                 parsed.imports.append(
                     ParsedImport(
                         raw=raw_import,
@@ -189,8 +229,32 @@ def _parse_with_tree_sitter(
                             file_path=file_path,
                             repo_root=repo_root,
                         ),
+                        symbols=symbols
                     )
                 )
+
+        if language in {"javascript", "typescript"} and node_kind == "export_statement":
+            decl = node.child_by_field_name("declaration")
+            if decl:
+                decl_kind = _node_kind(decl)
+                if decl_kind in JS_TS_CLASS_NODES or decl_kind in JS_TS_FUNCTION_NODES:
+                    name_node = decl.child_by_field_name("name")
+                    if name_node:
+                        parsed.exported_symbols.append(_node_text(name_node, source_bytes).strip())
+                elif decl_kind == "lexical_declaration" or decl_kind == "variable_declaration":
+                    for child in _node_children(decl):
+                        if _node_kind(child) == "variable_declarator":
+                            name_node = child.child_by_field_name("name")
+                            if name_node:
+                                parsed.exported_symbols.append(_node_text(name_node, source_bytes).strip())
+            else:
+                for child in _node_children(node):
+                    if _node_kind(child) == "export_clause":
+                        for specifier in _node_children(child):
+                            if _node_kind(specifier) == "export_specifier":
+                                name_node = specifier.child_by_field_name("name")
+                                if name_node:
+                                    parsed.exported_symbols.append(_node_text(name_node, source_bytes).strip())
 
     return parsed
 
@@ -639,3 +703,34 @@ def _as_repo_relative(path: Path, repo_root: Path) -> str:
         return str(path.resolve().relative_to(repo_root.resolve()))
     except ValueError:
         return str(path.resolve())
+
+def _extract_signature(node: Any, source_bytes: bytes) -> str:
+    parameters_node = node.child_by_field_name("parameters")
+    if parameters_node:
+        return _node_text(parameters_node, source_bytes).strip()
+    return "()"
+
+def _extract_imported_symbols(node: Any, source_bytes: bytes, language: str) -> list[str]:
+    symbols = []
+    if language == "python":
+        # from ... import A, B
+        for child in _node_children(node):
+            if _node_kind(child) == "aliased_import":
+                name_node = child.child_by_field_name("name")
+                if name_node:
+                    symbols.append(_node_text(name_node, source_bytes).strip())
+            elif _node_kind(child) == "dotted_name":
+                symbols.append(_node_text(child, source_bytes).strip())
+    elif language in {"javascript", "typescript"}:
+        for child in _node_children(node):
+            if _node_kind(child) == "import_clause":
+                for spec in _node_children(child):
+                    if _node_kind(spec) == "identifier":
+                        symbols.append(_node_text(spec, source_bytes).strip())
+                    elif _node_kind(spec) == "named_imports":
+                        for imp_spec in _node_children(spec):
+                            if _node_kind(imp_spec) == "import_specifier":
+                                name_node = imp_spec.child_by_field_name("name")
+                                if name_node:
+                                    symbols.append(_node_text(name_node, source_bytes).strip())
+    return symbols
