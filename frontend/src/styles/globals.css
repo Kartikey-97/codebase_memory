@@ -132,14 +132,15 @@ body,
 
 .sidebar-wordmark {
   font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--text-secondary);
-  padding: 20px 16px 16px;
+  padding: 24px 16px 20px;
   line-height: 1;
   user-select: none;
+  text-align: center;
 }
 
 .sidebar-section {
