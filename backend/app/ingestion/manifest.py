@@ -118,6 +118,7 @@ Important Files: {manifest_doc.get('important_files', [])}
 Task:
 1. Write a 3-4 sentence architecture summary explaining what this repository likely does based on these files.
 2. Group the files into 'architectural_roles' (frontend, backend_api, database).
+3. Extract 5-10 human-readable 'business_concepts' (e.g., 'volunteer allocation', 'JWT authentication', 'data pipeline') that this codebase seems to implement based on the directory and file names.
 
 Output exactly this JSON format:
 {{
@@ -126,7 +127,8 @@ Output exactly this JSON format:
         "frontend": ["file1", "file2"],
         "backend_api": ["file3"],
         "database": []
-    }}
+    }},
+    "business_concepts": ["concept1", "concept2"]
 }}
 """
         result = await asyncio.to_thread(model.generate_content, prompt)
@@ -151,7 +153,8 @@ Output exactly this JSON format:
             update_query={
                 "$set": {
                     "architecture_summary": parsed.get("architecture_summary", ""),
-                    "architectural_roles": parsed.get("architectural_roles", {})
+                    "architectural_roles": parsed.get("architectural_roles", {}),
+                    "business_concepts": parsed.get("business_concepts", [])
                 }
             }
         )

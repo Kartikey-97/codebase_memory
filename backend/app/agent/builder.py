@@ -95,7 +95,7 @@ CHAT_SYSTEM_INSTRUCTION = (
     "RULES FOR TOOL ROUTING:\n"
     "1. OVERVIEW: ALWAYS call get_repo_manifest() FIRST when asked about the repository's overall purpose, architecture, or tech stack.\n"
     "2. GRAPH-RAG (SUBSYSTEMS): When asked 'How does X work?', 'What is the flow of Y?', use find_subsystem_entrypoint() to find the root, then call analyze_subsystem(entry_file, max_depth=2) to trace the architecture.\n"
-    "3. GRAPH-RAG (IMPACT): When asked 'What happens if I change X?', call find_related_files(file_path) to safely traverse upstream dependents without exploding the context window.\n"
+    "3. GRAPH-RAG (IMPACT): When asked 'What happens if I change X?', 'Is it safe to modify Y?', or to 'Analyze blast radius', call impact_analysis(file_path) to predict severity and trace dependencies safely.\n"
     "4. SYMBOL SEARCH: Call search_symbols() to instantly find where a specific class or function is defined.\n"
     "5. FILE API: Call get_file_skeleton() to inspect the structural API (functions, classes, imports) of a single file.\n"
     "6. FALLBACK (VECTOR SEARCH): Call search_codebase() ONLY to retrieve exact implementation details or raw strings after you have structural context.\n"

@@ -44,7 +44,22 @@ async def main():
         })
         print("Successfully created 'chunk_embeddings' index.")
     except Exception as e:
-        print(f"Error creating index: {e}")
+        print(f"Error creating vector index: {e}")
+        
+    try:
+        from pymongo import ASCENDING, DESCENDING
+        await db.query_telemetry.create_index(
+            [("repo_id", ASCENDING), ("timestamp", DESCENDING)],
+            name="repo_id_timestamp_idx"
+        )
+        await db.query_telemetry.create_index(
+            "timestamp",
+            expireAfterSeconds=2592000,
+            name="timestamp_ttl_idx"
+        )
+        print("Successfully created 'query_telemetry' standard indexes.")
+    except Exception as e:
+        print(f"Error creating telemetry indexes: {e}")
     finally:
         client.close()
 

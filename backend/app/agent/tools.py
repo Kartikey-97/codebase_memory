@@ -22,9 +22,22 @@ class CodebaseAgentTools:
         self._db_name = get_settings().mongodb_db_name
         self._mcp_client = create_mcp_client()
         self.last_searched_paths: list[str] = []
+        self.telemetry = {
+            "tools_used": {},
+            "graph_nodes_traversed": 0
+        }
+        
+    def _track_tool(self, tool_name: str, nodes_added: int = 0) -> None:
+        if tool_name not in self.telemetry["tools_used"]:
+            self.telemetry["tools_used"][tool_name] = {"invocations": 0, "nodes_traversed": 0}
+        self.telemetry["tools_used"][tool_name]["invocations"] += 1
+        if nodes_added > 0:
+            self.telemetry["tools_used"][tool_name]["nodes_traversed"] += nodes_added
+            self.telemetry["graph_nodes_traversed"] += nodes_added
 
     def search_codebase(self, query: str, limit: int = 8) -> list[dict[str, Any]]:
         """Vector search code chunks for this repo and return top matches."""
+        self._track_tool("search_codebase")
         if not query.strip():
             return []
 
@@ -192,6 +205,7 @@ class CodebaseAgentTools:
 
     def get_file_skeleton(self, file_path: str) -> dict[str, Any]:
         """Fetch the architectural skeleton of a file (signatures, imports, exports) without loading the full source code. Use this when you need to know what a file exposes or imports."""
+        self._track_tool("get_file_skeleton")
         response = _run_async(
             self._mcp_client.find(
                 database=self._db_name,
@@ -264,6 +278,7 @@ class CodebaseAgentTools:
 
     def analyze_subsystem(self, entry_file: str, max_depth: int = 2) -> str:
         """Perform downstream traversal (Subsystem Analysis) starting from an entry point. Uses batch fetching to prevent N+1 Mongo queries."""
+        self._track_tool("analyze_subsystem")
         visited = set([entry_file])
         frontier = [entry_file]
         
@@ -349,10 +364,12 @@ class CodebaseAgentTools:
             
             frontier = next_frontier
             
+        self._track_tool("analyze_subsystem", nodes_added=len(visited))
         return "\n".join(summary_lines)
 
     def search_symbols(self, symbol_name: str) -> list[dict[str, Any]]:
         """Search the entire repository to find exactly which file defines a specific symbol (class or function)."""
+        self._track_tool("search_symbols")
         response = _run_async(
             self._mcp_client.find(
                 database=self._db_name,
@@ -376,17 +393,18 @@ class CodebaseAgentTools:
 
     def find_related_files(self, file_path: str, limit: int = 20) -> dict[str, Any]:
         """Perform upstream traversal (Impact Analysis) to find files that depend on the target file. Incorporates Hub Detection."""
+        self._track_tool("find_related_files")
         response = _run_async(
             self._mcp_client.find(
                 database=self._db_name,
                 collection="relationships",
                 filter_query={"repo_id": self.repo_id, "to_file": file_path, "_deleted": {"$ne": True}},
-                limit=limit + 50,  # Query more to detect hubs
+                limit=limit + 200,  # Query more to detect hubs
             )
         )
         edges = _extract_documents(response)
         
-        if len(edges) > 50:
+        if len(edges) > 200:
              return {
                  "hub_detected": True,
                  "message": f"Global Hub Detected: '{file_path}' has {len(edges)} inbound dependencies. Upstream traversal halted to prevent graph explosion.",
@@ -394,10 +412,152 @@ class CodebaseAgentTools:
              }
              
         dependents = [edge.get("from_file") for edge in edges[:limit]]
+        self._track_tool("find_related_files", nodes_added=len(dependents))
         return {
             "target": file_path,
             "dependents": dependents,
             "total_found": len(dependents)
+        }
+
+    def impact_analysis(self, file_path: str) -> dict[str, Any]:
+        """Predict the blast radius of modifying a file or symbol using Upstream BFS, Hub Detection, and Logarithmic Scoring."""
+        self._track_tool("impact_analysis")
+        import math
+        import re
+        from collections import Counter
+        from app.agent.classifier import RepoContextCache
+        
+        # Get Repo Context and File Count
+        context = _run_async(RepoContextCache().get_context(self.repo_id))
+        
+        count_resp = _run_async(
+            self._mcp_client.aggregate(
+                database=self._db_name,
+                collection="file_skeletons",
+                pipeline=[{"$count": "total_files"}]
+            )
+        )
+        total_files = 1000 # fallback
+        try:
+            docs = _extract_documents(count_resp)
+            if docs:
+                total_files = docs[0].get("total_files", 1000)
+        except Exception:
+            pass
+            
+        max_depth = 3
+        hub_threshold = max(50, int(total_files * 0.05))
+        
+        visited = set()
+        frontier = [file_path]
+        
+        direct_dependents = []
+        indirect_dependents = []
+        
+        for depth in range(max_depth):
+            if not frontier:
+                break
+                
+            rel_resp = _run_async(
+                self._mcp_client.find(
+                    database=self._db_name,
+                    collection="relationships",
+                    filter_query={"repo_id": self.repo_id, "to_file": {"$in": frontier}, "_deleted": {"$ne": True}},
+                    limit=10000
+                )
+            )
+            edges = _extract_documents(rel_resp)
+            
+            # Hub Detection per node
+            edge_counts = Counter(edge.get("to_file") for edge in edges)
+            
+            # Check if target is a global hub immediately
+            if depth == 0 and edge_counts.get(file_path, 0) > hub_threshold:
+                return {
+                    "severity": "Critical",
+                    "impact_score": 100,
+                    "affected_files": [],
+                    "affected_subsystems": ["Global"],
+                    "critical_symbols": [],
+                    "explanation": f"Target file '{file_path}' is a Global Hub with >{hub_threshold} direct dependents ({edge_counts[file_path]} found). Any modification carries extreme global risk."
+                }
+                    
+            next_frontier = []
+            for edge in edges:
+                ff = edge.get("from_file")
+                tf = edge.get("to_file")
+                
+                # If the node we are traversing FROM is a hub, don't fan out its dependents
+                if edge_counts.get(tf, 0) > hub_threshold:
+                    continue
+                    
+                if ff and ff not in visited and ff != file_path:
+                    visited.add(ff)
+                    next_frontier.append(ff)
+                    if depth == 0:
+                        direct_dependents.append(ff)
+                    else:
+                        indirect_dependents.append(ff)
+                        
+            frontier = next_frontier
+            
+        # Identify Critical Symbols
+        critical_symbols = set()
+        if direct_dependents:
+            skel_resp = _run_async(
+                self._mcp_client.find(
+                    database=self._db_name,
+                    collection="file_skeletons",
+                    filter_query={"repo_id": self.repo_id, "path": {"$in": direct_dependents[:50]}},
+                    limit=50
+                )
+            )
+            docs = _extract_documents(skel_resp)
+            for doc in docs:
+                for imp in doc.get("imported_modules", []):
+                    # Check if this import resolves to our target file
+                    if file_path.endswith(imp.get("module_name", "") + ".py") or file_path.endswith(imp.get("module_name", "") + ".ts"):
+                        for sym in imp.get("symbols", []):
+                            critical_symbols.add(sym)
+
+        # Logarithmic Scoring (Relative to Repo Size)
+        total_dependents = len(direct_dependents) + len(indirect_dependents)
+        dependency_percentile = (total_dependents / total_files) * 100 if total_files > 0 else 0
+        
+        impact_score = min(100, int((dependency_percentile / 10.0) * 100)) if dependency_percentile < 10 else 100
+        # If it impacts >10% of the repo, it's 100.
+        
+        if impact_score < 15:
+            severity = "Low"
+        elif impact_score < 40:
+            severity = "Medium"
+        elif impact_score < 75:
+            severity = "High"
+        else:
+            severity = "Critical"
+            
+        # Subsystem Detection using precise matching
+        affected_subsystems = set()
+        concepts = context.get("business_concepts", [])
+        
+        for f in direct_dependents + indirect_dependents:
+            for c in concepts:
+                # Use regex boundaries to prevent substring matching
+                if re.search(r'\b' + re.escape(c) + r'\b', f, re.IGNORECASE):
+                    affected_subsystems.add(c)
+                    
+        if not affected_subsystems:
+            affected_subsystems.add("Unknown Domain")
+
+        self._track_tool("impact_analysis", nodes_added=len(visited))
+        return {
+            "severity": severity,
+            "impact_score": impact_score,
+            "dependency_percentile": round(dependency_percentile, 2),
+            "affected_files": direct_dependents[:15] + ["..."] if len(direct_dependents) > 15 else direct_dependents,
+            "affected_subsystems": list(affected_subsystems),
+            "critical_symbols": list(critical_symbols)[:10],
+            "explanation": f"Found {len(direct_dependents)} direct and {len(indirect_dependents)} indirect dependents. Blast radius reaches {len(affected_subsystems)} semantic subsystems, affecting {round(dependency_percentile, 2)}% of the repository."
         }
 
     def write_insight(self, insight: dict[str, Any]) -> dict[str, Any]:
@@ -447,6 +607,7 @@ def build_tool_callables(
         tools.find_subsystem_entrypoint,
         tools.analyze_subsystem,
         tools.find_related_files,
+        tools.impact_analysis,
     ]
     return callables, tools
 

@@ -12,13 +12,16 @@ import asyncio
 import logging
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
+from starlette.background import BackgroundTask
 
 from app.agent.builder import AgentBuilderError, build_chat_agent, initialize_vertex_ai
+from app.agent.classifier import classify_query
 from app.config import get_settings
 from app.db.mcp_mongo import MongoMCPError
+from app.telemetry import record_telemetry
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 logger = logging.getLogger(__name__)
@@ -33,15 +36,51 @@ class ChatRequest(BaseModel):
     repo_id: str
     message: str
     history: list[ChatMessage] = []
+    active_document: str | None = None
 
 
 @router.post("")
 async def chat(payload: ChatRequest) -> EventSourceResponse:
     """Stream a chat response from the Gemini agent via SSE."""
+    
+    # Payload box allows the generator to pass data back out to the BackgroundTask
+    telemetry_box = []
 
     async def event_stream():
+        start_time = asyncio.get_event_loop().time()
+        classification = {}
+        class_latency_ms = 0
+        telemetry_status = "success"
+        telemetry_tools = {}
+        telemetry_nodes = 0
+        telemetry_tokens = {}
+        
         try:
             yield _sse("status", {"phase": "thinking", "message": "Thinking..."})
+
+            # Pre-flight Scope Enforcement
+            c_start = asyncio.get_event_loop().time()
+            classification = await classify_query(
+                repo_id=payload.repo_id, 
+                message=payload.message,
+                active_document=payload.active_document
+            )
+            class_latency_ms = int((asyncio.get_event_loop().time() - c_start) * 1000)
+            
+            if not classification.get("is_repo_related", True):
+                telemetry_status = "rejected_scope"
+                reason = classification.get("reason", "")
+                msg = "Scope verification is currently unavailable. Please try again later." if "unavailable" in reason else "I can only answer questions about the indexed repository."
+                yield _sse(
+                    "message",
+                    {
+                        "role": "agent",
+                        "content": msg,
+                        "sources": [],
+                        "message": msg,
+                    },
+                )
+                return
 
             # Build the full prompt with conversation history for context.
             full_prompt = _build_prompt_with_history(
@@ -74,10 +113,34 @@ async def chat(payload: ChatRequest) -> EventSourceResponse:
             else:
                 response_text = str(output) if output else "I couldn't generate a response."
 
-            # Sources are populated from tools_instance.last_searched_paths
-            # by _run_chat_agent — these are the actual files that
-            # search_codebase() retrieved during this request.
             sources = agent_result.get("sources", [])
+            telemetry_data = agent_result.get("telemetry", {})
+            telemetry_tools = telemetry_data.get("tools_used", {})
+            telemetry_nodes = telemetry_data.get("graph_nodes_traversed", 0)
+            
+            # Exact Token Accounting from Vertex/Langchain
+            prompt_tokens = 0
+            completion_tokens = 0
+            
+            # ReasoningEngine often returns usage_metadata internally
+            if "usage_metadata" in agent_result and agent_result["usage_metadata"] is not None:
+                usage = agent_result["usage_metadata"]
+                if isinstance(usage, dict):
+                    prompt_tokens = usage.get("prompt_token_count", len(full_prompt) // 4)
+                    completion_tokens = usage.get("candidates_token_count", len(response_text) // 4)
+                else:
+                    prompt_tokens = getattr(usage, "prompt_token_count", len(full_prompt) // 4)
+                    completion_tokens = getattr(usage, "candidates_token_count", len(response_text) // 4)
+            else:
+                # Fallback to naive if metadata is completely stripped
+                prompt_tokens = len(full_prompt) // 4
+                completion_tokens = len(response_text) // 4
+                
+            telemetry_tokens = {
+                "prompt_tokens": prompt_tokens, 
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens
+            }
 
             yield _sse(
                 "message",
@@ -115,33 +178,65 @@ async def chat(payload: ChatRequest) -> EventSourceResponse:
                     "code": "chat_failed",
                 },
             )
+            telemetry_status = "error"
         finally:
+            end_time = asyncio.get_event_loop().time()
+            total_latency_ms = int((end_time - start_time) * 1000)
+            
+            telemetry_payload = {
+                "repo_id": payload.repo_id,
+                "session_id": "anon", # Can be extracted from headers if auth is added
+                "query": {
+                    "text_scrubbed": payload.message,
+                    "has_ide_context": bool(payload.active_document)
+                },
+                "classification": {
+                    "is_repo_related": classification.get("is_repo_related", False),
+                    "confidence": classification.get("confidence", 0.0),
+                    "reason": classification.get("reason", ""),
+                    "latency_ms": class_latency_ms,
+                    "mode": "deterministic" if classification.get("confidence") == 1.0 else "llm"
+                },
+                "execution": {
+                    "total_latency_ms": total_latency_ms,
+                    "tools_used": list(telemetry_tools.keys()) if telemetry_tools else [],
+                    "tool_stats": telemetry_tools,
+                    "graph_nodes_traversed": telemetry_nodes,
+                    "token_usage": telemetry_tokens,
+                    "status": telemetry_status
+                }
+            }
+            telemetry_box.append(telemetry_payload)
             yield _sse("done", {"ok": True, "message": "SSE stream closed."})
 
-    return EventSourceResponse(event_stream())
+    async def dispatch_telemetry():
+        if telemetry_box:
+            await record_telemetry(telemetry_box[0])
 
+    return EventSourceResponse(event_stream(), background=BackgroundTask(dispatch_telemetry))
 
 # ── Private helpers ──────────────────────────────────────────────────
-
 
 def _run_chat_agent(*, repo_id: str, prompt: str) -> dict[str, Any]:
     """Run the chat agent synchronously (called via asyncio.to_thread).
 
-    Returns a dict with "output" (the agent response) and "sources"
-    (file paths accumulated by search_codebase during tool execution).
+    Returns a dict with "output" (the agent response), "sources"
+    (file paths accumulated by search_codebase), and "telemetry".
     """
     agent, tools_instance = build_chat_agent(repo_id=repo_id)
 
     response = agent.query(input=prompt)
 
-    # Read the per-instance accumulator — these are the actual file paths
-    # that search_codebase() returned during this request.
     sources = list(tools_instance.last_searched_paths)
 
     if isinstance(response, dict):
         response["sources"] = sources
+        response["telemetry"] = tools_instance.telemetry
         return response
-    return {"output": response, "sources": sources}
+        
+    # Attempt to extract usage from Langchain's RunTree or metadata if attached
+    usage = getattr(response, "usage_metadata", None)
+    return {"output": response, "sources": sources, "telemetry": tools_instance.telemetry, "usage_metadata": usage}
 
 
 def _build_prompt_with_history(
