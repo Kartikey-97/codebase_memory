@@ -158,5 +158,23 @@ Output exactly this JSON format:
                 }
             }
         )
+        
+        from datetime import datetime, UTC
+        from bson import ObjectId
+        await mcp_client.insert_many(
+            database=settings.mongodb_db_name,
+            collection="insights",
+            documents=[{
+                "_id": str(ObjectId()),
+                "repo_id": repo_id,
+                "type": "repo_overview",
+                "severity": "info",
+                "title": "Architecture Overview",
+                "description": parsed.get("architecture_summary", ""),
+                "affected_files": [],
+                "created_at": datetime.now(UTC).isoformat(),
+                "resolved": False
+            }]
+        )
     except Exception as exc:
         print(f"Failed to generate architecture summary asynchronously: {exc}")

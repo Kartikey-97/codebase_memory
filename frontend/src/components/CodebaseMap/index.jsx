@@ -434,27 +434,24 @@ function CodebaseMap({ repoId }) {
             </div>
           )}
           <div className={styles.popoverSummary}>
-            {summary ? (
-              <div className={styles.summaryText}>{summary}</div>
-            ) : (
-              <div style={{ display: 'flex', gap: '8px', flexDirection: 'column' }}>
-                <button 
-                  className={styles.summarizeBtn} 
-                  onClick={handleSummarize} 
-                  disabled={summarizing || summarizingCluster}
-                >
-                  {summarizing ? 'Summarizing...' : 'Summarize File'}
-                </button>
-                <button 
-                  className={styles.summarizeBtn} 
-                  onClick={handleSummarizeCluster} 
-                  disabled={summarizing || summarizingCluster}
-                  style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-                >
-                  {summarizingCluster ? 'Summarizing...' : 'Summarize Cluster'}
-                </button>
-              </div>
-            )}
+            {summary && <div className={styles.summaryText}>{summary}</div>}
+            <div style={{ display: 'flex', gap: '8px', flexDirection: 'column', marginTop: summary ? '12px' : '0' }}>
+              <button 
+                className={styles.summarizeBtn} 
+                onClick={handleSummarize} 
+                disabled={summarizing || summarizingCluster}
+              >
+                {summarizing ? 'Summarizing...' : 'Summarize File'}
+              </button>
+              <button 
+                className={styles.summarizeBtn} 
+                onClick={handleSummarizeCluster} 
+                disabled={summarizing || summarizingCluster}
+                style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+              >
+                {summarizingCluster ? 'Summarizing...' : 'Summarize Cluster'}
+              </button>
+            </div>
           </div>
         </div>
       )}

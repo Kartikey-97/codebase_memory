@@ -93,99 +93,71 @@ async def ingest_repo(payload: IngestRequest) -> EventSourceResponse:
             parsed_by_path: dict[str, ParsedFile] = {}
             source_by_path: dict[str, str] = {}
 
-            for index, rel_path in enumerate(parse_targets, start=1):
-                absolute_path = clone_root / rel_path
-                source_text = await asyncio.to_thread(absolute_path.read_text, "utf-8", "ignore")
-                parsed_file = await asyncio.to_thread(parse_file, absolute_path, clone_root)
-                chunks = await asyncio.to_thread(create_chunks_for_file, parsed_file, source_text)
-                parsed_by_path[rel_path] = parsed_file
-                source_by_path[rel_path] = source_text
+            sem = asyncio.Semaphore(15)
 
-                function_count = len(parsed_file.functions)
-                documented_count = sum(
-                    1 for function in parsed_file.functions if function.has_docstring
-                )
-                doc_coverage = (documented_count / function_count) if function_count else 0.0
-                max_complexity = (
-                    max((f.cyclomatic_complexity for f in parsed_file.functions), default=0)
-                    if function_count
-                    else 0
-                )
+            async def process_file_target(rel_path: str):
+                async with sem:
+                    absolute_path = clone_root / rel_path
+                    source_text = await asyncio.to_thread(absolute_path.read_text, "utf-8", "ignore")
+                    parsed_file = await asyncio.to_thread(parse_file, absolute_path, clone_root)
+                    chunks = await asyncio.to_thread(create_chunks_for_file, parsed_file, source_text)
+                    return rel_path, source_text, parsed_file, chunks
 
-                import hashlib
-                content_hash = hashlib.sha256(source_text.encode("utf-8", errors="replace")).hexdigest()
-                file_id = str(ObjectId())
-                stat_result = absolute_path.stat()
-                file_doc = {
-                    "_id": file_id,
-                    "repo_id": repo_id,
-                    "path": rel_path,
-                    "language": parsed_file.language,
-                    "size_bytes": int(stat_result.st_size),
-                    "last_modified": datetime.fromtimestamp(stat_result.st_mtime, UTC).isoformat(),
-                    "content_hash": content_hash,
-                    "owner": owner_by_path.get(rel_path, ""),
-                    "doc_coverage": doc_coverage,
-                    "max_complexity": max_complexity,
-                    "indexed_at": datetime.now(UTC).isoformat(),
-                }
-                files_collection_docs.append(file_doc)
+            tasks = [process_file_target(p) for p in parse_targets]
+            for i in range(0, len(tasks), 50):
+                batch = tasks[i:i+50]
+                results = await asyncio.gather(*batch)
+                for rel_path, source_text, parsed_file, chunks in results:
+                    parsed_by_path[rel_path] = parsed_file
+                    source_by_path[rel_path] = source_text
 
-                chunk_docs = _build_chunk_documents(repo_id=repo_id, file_id=file_id, chunks=chunks)
-                chunks_collection_docs.extend(chunk_docs)
+                    function_count = len(parsed_file.functions)
+                    documented_count = sum(1 for function in parsed_file.functions if function.has_docstring)
+                    doc_coverage = (documented_count / function_count) if function_count else 0.0
+                    max_complexity = max((f.cyclomatic_complexity for f in parsed_file.functions), default=0) if function_count else 0
 
-                # Construct File Skeleton
-                defined_symbols = []
-                for cls in parsed_file.classes:
-                    defined_symbols.append({"name": cls.name, "type": "class"})
-                for func in parsed_file.functions:
-                    defined_symbols.append({"name": func.name, "type": "function"})
+                    import hashlib
+                    content_hash = hashlib.sha256(source_text.encode("utf-8", errors="replace")).hexdigest()
+                    file_id = str(ObjectId())
+                    stat_result = (clone_root / rel_path).stat()
+                    file_doc = {
+                        "_id": file_id,
+                        "repo_id": repo_id,
+                        "path": rel_path,
+                        "language": parsed_file.language,
+                        "size_bytes": int(stat_result.st_size),
+                        "last_modified": datetime.fromtimestamp(stat_result.st_mtime, UTC).isoformat(),
+                        "content_hash": content_hash,
+                        "owner": owner_by_path.get(rel_path, ""),
+                        "doc_coverage": doc_coverage,
+                        "max_complexity": max_complexity,
+                        "indexed_at": datetime.now(UTC).isoformat(),
+                    }
+                    files_collection_docs.append(file_doc)
 
-                skeleton_doc = {
-                    "_id": str(ObjectId()),
-                    "repo_id": repo_id,
-                    "file_id": file_id,
-                    "path": rel_path,
-                    "file_purpose": parsed_file.file_purpose,
-                    "has_docs": doc_coverage > 0,
-                    "complexity_score": max_complexity,
-                    "defined_symbols": defined_symbols,
-                    "exported_symbols": parsed_file.exported_symbols,
-                    "imported_modules": [
-                        {"module": imp.raw, "symbols": imp.symbols} for imp in parsed_file.imports
-                    ],
-                    "classes": [
-                        {
-                            "name": cls.name,
-                            "base_classes": cls.base_classes,
-                            "methods": [
-                                {
-                                    "name": m.name,
-                                    "signature": m.signature,
-                                    "is_public": m.is_public
-                                } for m in cls.methods
-                            ]
-                        } for cls in parsed_file.classes
-                    ],
-                    "functions": [
-                        {
-                            "name": func.name,
-                            "signature": func.signature,
-                            "is_public": func.is_public,
-                            "is_async": False  # To be extracted later if needed
-                        } for func in parsed_file.functions
-                    ]
-                }
-                skeletons_collection_docs.append(skeleton_doc)
+                    chunk_docs = _build_chunk_documents(repo_id=repo_id, file_id=file_id, chunks=chunks)
+                    chunks_collection_docs.extend(chunk_docs)
 
-                if index % 25 == 0 or index == len(parse_targets):
-                    yield _sse(
-                        "status",
-                        {
-                            "phase": "parse",
-                            "message": f"Parsed {index}/{len(parse_targets)} files...",
-                        },
-                    )
+                    defined_symbols = [{"name": cls.name, "type": "class"} for cls in parsed_file.classes]
+                    defined_symbols.extend([{"name": func.name, "type": "function"} for func in parsed_file.functions])
+
+                    skeleton_doc = {
+                        "_id": str(ObjectId()),
+                        "repo_id": repo_id,
+                        "file_id": file_id,
+                        "path": rel_path,
+                        "file_purpose": parsed_file.file_purpose,
+                        "has_docs": doc_coverage > 0,
+                        "complexity_score": max_complexity,
+                        "defined_symbols": defined_symbols,
+                        "exported_symbols": parsed_file.exported_symbols,
+                        "imported_modules": [{"module": imp.raw, "symbols": imp.symbols} for imp in parsed_file.imports],
+                        "classes": [{"name": cls.name, "base_classes": cls.base_classes, "methods": [{"name": m.name, "signature": m.signature, "is_public": m.is_public} for m in cls.methods]} for cls in parsed_file.classes],
+                        "functions": [{"name": func.name, "signature": func.signature, "is_public": func.is_public, "is_async": False} for func in parsed_file.functions]
+                    }
+                    skeletons_collection_docs.append(skeleton_doc)
+
+                yield _sse("status", {"phase": "parse", "message": f"Parsed {min(i+50, len(parse_targets))}/{len(parse_targets)} files..."})
 
             yield _sse(
                 "status", {"phase": "insert", "message": "Writing files metadata to MongoDB MCP..."}
@@ -271,16 +243,23 @@ async def ingest_repo(payload: IngestRequest) -> EventSourceResponse:
             # Fire and forget
             asyncio.create_task(generate_architecture_summary_async(repo_id, manifest_id, manifest_doc))
 
-            yield _sse("status", {"phase": "insights", "message": "Generating insights..."})
+            yield _sse("status", {"phase": "insights", "message": "Queueing insights for background generation..."})
 
             insight_failed = False
             try:
                 from app.api.insights import build_insight_task_prompt, _run_insight_agent
-                task_prompt = build_insight_task_prompt(repo_id=repo_id)
-                await asyncio.to_thread(_run_insight_agent, repo_id=repo_id, task_prompt=task_prompt)
+                
+                async def fire_and_forget_insights():
+                    try:
+                        task_prompt = build_insight_task_prompt(repo_id=repo_id)
+                        await asyncio.to_thread(_run_insight_agent, repo_id=repo_id, task_prompt=task_prompt)
+                    except Exception as e:
+                        print(f"Background insight generation failed: {e}")
+                        
+                asyncio.create_task(fire_and_forget_insights())
             except Exception as exc:
                 insight_failed = True
-                yield _sse("error", {"message": f"Insight generation failed: {exc}"})
+                yield _sse("error", {"message": f"Insight queueing failed: {exc}"})
 
             final_status = "insight_failed" if insight_failed else "ready"
             final_repo_doc = {
