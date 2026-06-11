@@ -392,8 +392,8 @@ function CodebaseMap({ repoId }) {
           onChange={(e) => setFilterText(e.target.value)}
         />
         <div className={styles.filterPills} style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
-          <button className={styles.filterPill} onClick={() => setFilterText('src/')} style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer', color: 'var(--text-secondary)' }}>Frontend</button>
-          <button className={styles.filterPill} onClick={() => setFilterText('app/')} style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer', color: 'var(--text-secondary)' }}>Backend</button>
+          <button className={styles.filterPill} onClick={() => setFilterText('frontend')} style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer', color: 'var(--text-secondary)' }}>Frontend</button>
+          <button className={styles.filterPill} onClick={() => setFilterText('backend')} style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer', color: 'var(--text-secondary)' }}>Backend</button>
           <button className={styles.filterPill} onClick={() => setFilterText('.json')} style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer', color: 'var(--text-secondary)' }}>Config</button>
           <button className={styles.filterPill} onClick={() => setFilterText('')} style={{ background: 'transparent', border: 'none', padding: '4px 8px', fontSize: '11px', cursor: 'pointer', color: 'var(--text-muted)' }}>Clear</button>
         </div>

@@ -3,7 +3,7 @@ import styles from './styles.module.css';
 import { IS_MOCK, getMockInsights } from '../../mock';
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
-const POLL_INTERVAL = 30_000;
+const POLL_INTERVAL = 5_000;
 
 const SEVERITY_OPTIONS = ['critical', 'warning', 'info', 'suggestion'];
 const TYPE_OPTIONS = [

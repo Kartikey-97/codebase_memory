@@ -116,13 +116,14 @@ Major Directories: {manifest_doc.get('major_directories', [])}
 Important Files: {manifest_doc.get('important_files', [])}
 
 Task:
-1. Write a 3-4 sentence architecture summary explaining what this repository likely does based on these files.
-2. Group the files into 'architectural_roles' (frontend, backend_api, database).
-3. Extract 5-10 human-readable 'business_concepts' (e.g., 'volunteer allocation', 'JWT authentication', 'data pipeline') that this codebase seems to implement based on the directory and file names.
+1. Write a 3-4 sentence project overview explaining the core product/domain (What does this project actually do? e.g., 'An e-commerce platform', 'A ridesharing app').
+2. Write a 2-3 sentence architecture summary explaining the technical structure (e.g., 'React frontend communicating with a FastAPI backend').
+3. Group the files into 'architectural_roles' (frontend, backend_api, database).
+4. Extract 5-10 human-readable 'business_concepts' that this codebase implements.
 
 Output exactly this JSON format:
 {{
-    "architecture_summary": "...",
+    "architecture_summary": "Project Overview: ...\\n\\nArchitecture: ...",
     "architectural_roles": {{
         "frontend": ["file1", "file2"],
         "backend_api": ["file3"],
