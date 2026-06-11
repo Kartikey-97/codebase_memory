@@ -63,7 +63,8 @@ async def chat(payload: ChatRequest) -> EventSourceResponse:
             classification = await classify_query(
                 repo_id=payload.repo_id, 
                 message=payload.message,
-                active_document=payload.active_document
+                active_document=payload.active_document,
+                history=payload.history
             )
             class_latency_ms = int((asyncio.get_event_loop().time() - c_start) * 1000)
             
