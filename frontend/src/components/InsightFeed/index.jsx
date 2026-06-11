@@ -193,8 +193,8 @@ function InsightCard({ insight, index, expanded, onToggle }) {
         <span className={styles.cardTime}>{relativeTime(insight.created_at)}</span>
       </div>
 
-      <div className={styles.cardDesc}>
-        {expanded ? insight.description : truncate(insight.description, 120)}
+      <div className={styles.cardDesc} style={{ whiteSpace: 'pre-wrap' }}>
+        {expanded || insight.type === 'repo_overview' ? insight.description : truncate(insight.description, 120)}
       </div>
 
       <div className={styles.cardFiles}>

@@ -17,7 +17,7 @@ call write_insight() for every finding that matches a detection rule.
 ─── ANALYSIS PROTOCOL ───
 
 STEP 1 — GATHER CONTEXT
-  a) Call list_high_risk_files(min_dependents=1, max_doc_coverage=1.0) to get
+  a) Call get_high_risk_dependents(min_dependents=1, max_doc_coverage=1.0) to get
      files with at least 1 dependent and their metadata.
   b) For each high-risk file returned, call get_file_relationships(file_path)
      to get its full dependency graph (inbound and outbound edges).
@@ -122,7 +122,7 @@ INSIGHT_TASK_PROMPT = """\
 Analyze repository "{repo_id}" for code health issues.
 
 Execute the full analysis protocol from your system instructions:
-1. Call list_high_risk_files(min_dependents=1, max_doc_coverage=1.0) to gather context.
+1. Call get_high_risk_dependents(min_dependents=1, max_doc_coverage=1.0) to gather context.
 2. Call get_file_relationships() for each high-risk file.
 3. Call search_codebase() to find duplicate-logic candidates.
 4. Apply all 8 detection rules (including architecture_suggestion and feature_recommendation).

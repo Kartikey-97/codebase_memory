@@ -128,7 +128,22 @@ function CodebaseMap({ repoId }) {
 
     const nodeMap = {};
     const nodes = files
-      .filter((f) => !currentFilter || f.path.toLowerCase().includes(currentFilter.toLowerCase()))
+      .filter((f) => {
+        if (!currentFilter) return true;
+        const pathStr = f.path.toLowerCase();
+        
+        if (currentFilter === '@frontend') {
+          return pathStr.includes('src/') || pathStr.includes('components/') || pathStr.includes('pages/') || pathStr.includes('frontend/') || pathStr.endsWith('.jsx') || pathStr.endsWith('.tsx') || pathStr.endsWith('.ts');
+        }
+        if (currentFilter === '@backend') {
+          return pathStr.includes('app/') || pathStr.includes('api/') || pathStr.includes('backend/') || pathStr.endsWith('.py') || pathStr.endsWith('.go');
+        }
+        if (currentFilter === '@config') {
+          return pathStr.endsWith('.json') || pathStr.endsWith('.yaml') || pathStr.endsWith('.md');
+        }
+
+        return pathStr.includes(currentFilter.toLowerCase());
+      })
       .map((f) => {
         const deps = dependentCount[f.path] || 0;
         const node = {
@@ -392,9 +407,9 @@ function CodebaseMap({ repoId }) {
           onChange={(e) => setFilterText(e.target.value)}
         />
         <div className={styles.filterPills} style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
-          <button className={styles.filterPill} onClick={() => setFilterText('frontend')} style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer', color: 'var(--text-secondary)' }}>Frontend</button>
-          <button className={styles.filterPill} onClick={() => setFilterText('backend')} style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer', color: 'var(--text-secondary)' }}>Backend</button>
-          <button className={styles.filterPill} onClick={() => setFilterText('.json')} style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer', color: 'var(--text-secondary)' }}>Config</button>
+          <button className={styles.filterPill} onClick={() => setFilterText('@frontend')} style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer', color: 'var(--text-secondary)' }}>Frontend</button>
+          <button className={styles.filterPill} onClick={() => setFilterText('@backend')} style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer', color: 'var(--text-secondary)' }}>Backend</button>
+          <button className={styles.filterPill} onClick={() => setFilterText('@config')} style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer', color: 'var(--text-secondary)' }}>Config</button>
           <button className={styles.filterPill} onClick={() => setFilterText('')} style={{ background: 'transparent', border: 'none', padding: '4px 8px', fontSize: '11px', cursor: 'pointer', color: 'var(--text-muted)' }}>Clear</button>
         </div>
       </div>
