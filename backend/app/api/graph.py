@@ -95,7 +95,7 @@ async def summarize_file(payload: SummarizeRequest) -> dict[str, Any]:
     initialize_vertex_ai()
     from vertexai.generative_models import GenerativeModel
     
-    model = GenerativeModel("gemini-2.5-flash")
+    model = GenerativeModel("gemini-1.5-flash")
     prompt = f"Summarize the purpose of this file in 1 or 2 concise sentences. Do not use markdown or formatting. File path: {payload.path}\n\nCode:\n{content}"
     
     for attempt in range(3):
@@ -162,7 +162,7 @@ async def summarize_cluster(payload: SummarizeRequest) -> dict[str, Any]:
     initialize_vertex_ai()
     from vertexai.generative_models import GenerativeModel
     
-    model = GenerativeModel("gemini-2.5-flash")
+    model = GenerativeModel("gemini-1.5-flash")
     prompt = f"Summarize the collective purpose and interaction of this cluster of connected files in 2 or 3 concise sentences. The central file is {payload.path}. Do not use markdown or formatting.\n\nCode context:\n{content}"
     
     for attempt in range(3):

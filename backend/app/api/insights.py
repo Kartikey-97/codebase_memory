@@ -197,7 +197,7 @@ def _run_insight_agent(*, repo_id: str, task_prompt: str) -> dict[str, Any]:
     tools, _ = build_tool_callables(repo_id=repo_id)
 
     agent = reasoning_engines.LangchainAgent(
-        model=get_settings().vertex_ai_model_ingest,
+        model="gemini-1.5-flash",
         tools=tools,
         system_instruction=system_prompt,
     )

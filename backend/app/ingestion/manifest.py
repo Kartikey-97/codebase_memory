@@ -102,7 +102,7 @@ async def generate_architecture_summary_async(repo_id: str, manifest_id: str, ma
 
     try:
         initialize_vertex_ai()
-        model = GenerativeModel("gemini-2.5-flash")
+        model = GenerativeModel("gemini-1.5-flash")
         
         prompt = f"""
 Analyze the following repository manifest and generate an architecture summary.
