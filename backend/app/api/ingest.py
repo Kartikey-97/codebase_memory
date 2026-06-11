@@ -241,7 +241,6 @@ async def ingest_repo(payload: IngestRequest) -> EventSourceResponse:
             )
             
             # Insert pending placeholder insight
-            from datetime import datetime, UTC
             await mcp_client.insert_many(
                 database=settings.mongodb_db_name,
                 collection="insights",
